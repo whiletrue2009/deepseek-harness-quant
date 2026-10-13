@@ -128,7 +128,7 @@ async function init(){
   }catch(e){}
   if(!S.pool && !S.risk){
     $('#hint').style.display='block';
-    $('#hint').innerHTML='⚠️ 请通过本地服务器打开看板：<code>cd deepseek-harness-quant && ./.venv/Scripts/python.exe deck/deck_server.py</code> → <b>http://127.0.0.1:8787/dashboard.html</b>';
+  $('#hint').innerHTML='⚠️ 请通过本地服务器打开看板：<code>cd deepseek-harness-quant && ./.venv/bin/python deck/deck_server.py</code> → <b>http://127.0.0.1:8787/dashboard.html</b>';
     return;
   }
   render();

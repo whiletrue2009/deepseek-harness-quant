@@ -34,9 +34,12 @@ BASE = Path(__file__).resolve().parent.parent.parent
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
-BARS_DB = r"data/cache/bars.db"
-QD_DB = r"data/cache/finance_quality.db"
-BASIC_DB = r"data/cache/stock_basic.db"
+from data.cache import CACHE_DIR
+
+BARS_DB = CACHE_DIR / "bars.db"
+QD_DB = CACHE_DIR / "finance_quality.db"
+BASIC_DB = CACHE_DIR / "stock_basic.db"
+FIN_TS_DB = CACHE_DIR / "finance_ts.db"
 
 TYPE_CN = {
     "value": "低估值", "revalue": "价值重估", "quality_gap": "质量折价",
@@ -45,8 +48,8 @@ TYPE_CN = {
 
 
 def _ro_conn(db: str):
-    """★immutable 只读连接（2026-08-10：普通 connect 因大文件+锁等待要 20s，只读场景用这个秒开）"""
-    return sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True, timeout=3)
+    """普通只读连接；初始化写入期间 immutable 快照可能不一致。"""
+    return sqlite3.connect(f"{Path(db).resolve().as_uri()}?mode=ro", uri=True, timeout=10)
 
 _valuation_cache = {"ts": 0, "data": None}
 
@@ -180,10 +183,7 @@ def _growth_metrics(code: str):
     """成长维度（finance_ts 最新财报）：净利同比 + ROE + 净资产增速"""
     try:
         import sqlite3 as sq
-        con = sq.connect(f"file:{BARS_DB.rsplit('/', 1)[0]}/finance_ts.db?mode=ro&immutable=1"
-                         if "/" in BARS_DB else
-                         "file:data/cache/finance_ts.db?mode=ro&immutable=1",
-                         uri=True, timeout=3)
+        con = sq.connect(f"{FIN_TS_DB.resolve().as_uri()}?mode=ro", uri=True, timeout=3)
         rows = con.execute(
             "SELECT ann_date, n_income, total_hldr_eqy_exc_min_int FROM financials_ts "
             "WHERE code=? AND ann_date IS NOT NULL AND ann_date != '' "

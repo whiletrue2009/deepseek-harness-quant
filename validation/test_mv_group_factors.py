@@ -21,7 +21,7 @@ from data.cache import DailyCache
 from factors.factor_engine import FACTOR_FUNCS
 
 START, END = "2020-01-01", "2025-12-31"
-MV_MAP_CSV = r"data/cache\circ_mv_map.csv"
+MV_MAP_CSV = r"data/cache/circ_mv_map.csv"
 
 # 中银五等分组边界（市值排名分位）
 GROUP_EDGES = [0.0, 0.20, 0.45, 0.55, 0.80, 1.0]

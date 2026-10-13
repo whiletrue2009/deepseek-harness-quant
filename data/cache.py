@@ -44,6 +44,11 @@ DEFAULT_DB = CACHE_DIR / "bars.db"
 #   背景：扫描/回测只读不受影响；每日增量管道写 incr 库后读取方自动见最新数据。
 INC_DB = CACHE_DIR / "bars_incr.db"
 
+
+def cache_path(*parts: str) -> Path:
+    """返回当前配置下的缓存文件路径，供绕不开裸 SQLite 的专项脚本使用。"""
+    return CACHE_DIR.joinpath(*parts)
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS daily_bar (
     code       TEXT NOT NULL,
@@ -73,12 +78,13 @@ _NUM_COLS = ["open", "high", "low", "close", "preclose",
 
 
 # ★2026-08-15 单位归一（统一标准，消除混源 bug 根因）
-#   bars.db 混源：tushare/tushare_backup = amount千元、volume手；baostock/akshare = amount元、volume股
+#   bars.db 混源：tushare/tushare_backup = amount千元、volume手；
+#   baostock/akshare/ths = amount元、volume股
 #   消费端凡用 amount/volume 参与计算（换手率/PB/成交额占比等），必须先经本函数归一，禁止各写各的 ×1000。
 def normalize_units(df: pd.DataFrame) -> pd.DataFrame:
     """把混源 amount/volume 归一为统一单位：amount=元、volume=股。
     按 source 列判断：tushare/tushare_backup（千元/手）→ amount×1000、volume×100；
-    baostock/akshare（元/股）不变。无 source 列时保守不转换（调用方需自证单位）。"""
+    baostock/akshare/ths（元/股）不变。无 source 列时保守不转换（调用方需自证单位）。"""
     if df is None or df.empty or "source" not in df.columns:
         return df
     ts = df["source"].isin(["tushare", "tushare_backup"])
@@ -115,11 +121,11 @@ class DailyCache:
 
     # ---------- 内部 ----------
     def _conn(self):
-        con = sqlite3.connect(self.db_path)
+        con = sqlite3.connect(self.db_path, timeout=30)
         return con
 
     def _conn_inc(self):
-        con = sqlite3.connect(self.inc_path)
+        con = sqlite3.connect(self.inc_path, timeout=30)
         return con
 
     def _init_schema(self):
@@ -185,7 +191,7 @@ class DailyCache:
                 _f(r.get("turn")), _f(r.get("pct_chg")), int(r.get("is_st") or 0),
                 adjust, source,
             ))
-        con = sqlite3.connect(target)
+        con = sqlite3.connect(target, timeout=30)
         try:
             con.executemany(
                 "INSERT OR REPLACE INTO daily_bar "
@@ -246,7 +252,7 @@ class DailyCache:
                 _f(r.get("turn")), _f(r.get("pct_chg")), int(r.get("is_st") or 0),
                 adjust, source,
             ))
-        con = sqlite3.connect(target)
+        con = sqlite3.connect(target, timeout=30)
         try:
             con.executemany(
                 "INSERT OR REPLACE INTO daily_bar "
@@ -276,9 +282,14 @@ class DailyCache:
 
     @staticmethod
     def _ro_uri(p) -> str:
-        """只读 immutable URI（★主库 3.7GB 普通连接等锁 20s → immutable 0.01s；
-        已登记文件被环境锁只读时普通连接会等满 timeout）"""
-        return f"{Path(p).as_uri()}?mode=ro&immutable=1"
+        """只读 URI：活跃写入库用普通只读，静止大库用 immutable 提速。
+        immutable 只能用于不再提交的文件；初始化进程写入期间使用它会读到不一致快照。"""
+        try:
+            active = time.time() - Path(p).stat().st_mtime < 60
+        except OSError:
+            active = False
+        mode = "mode=ro" if active else "mode=ro&immutable=1"
+        return f"{Path(p).as_uri()}?{mode}"
 
     # ---------- 读取（唯一读取入口）----------
     def latest_trade_date(self):

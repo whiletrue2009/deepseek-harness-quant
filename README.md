@@ -32,7 +32,7 @@ copy harness\home\.credentials.yaml.example harness\home\.credentials.yaml
 #    DEEPSEEK_API_KEY: sk-<your-key>
 
 # 3. 启动（打印「启动 DeepSeek HARNESS」即集成成功）
-python launcher.py
+.venv/bin/python launcher.py
 #    http://127.0.0.1:8787/control
 ```
 
@@ -44,7 +44,7 @@ python launcher.py
 - **牛散**：7 位牛散人格对话选股，决策自动入远期池验证
 - **魔改**：动态 Cordis 插件热更新，系统行为运行时改，不重编译
 
-其余数据源（Tushare 等）接入后让 AI 指导完成。核心逻辑：先接 AI 的 API，AI 帮你接剩下的。
+默认免费真实数据链不需要 Tushare：Baostock 负责沪深日线，腾讯负责实时估值，同花顺负责财务质量。旧数据源只在显式选择后由 AI 指导接入。当前默认研究 Universe 不含北交所。
 
 ## 架构
 
@@ -62,9 +62,11 @@ python launcher.py
 
 ## 因子
 
-123+ 因子，全部 A 股本地实证（PIT / T+1 / 分年度）。九步入池，17+ 项证伪留档。
+当前 fork 可直接执行的是机会扫描、Pitch、择时、三层池与 T+1/5/20/60 远期验证。README 历史版本提到的 123+ 因子、AlphaGPT 与九步入池资产依赖 `data/factorpool`；该目录不在开源包内，需重建或导入后才能运行，不能把方法论当成已内置能力。
 
-| 维度 | 代表 | 实证 |
+下表只是历史因子池资产的口径参考，不代表当前 fork 已内置：
+
+| 维度 | 代表 | 历史实证 |
 |---|---|---|
 | 换手率 | turn_mid_prox / turnover / turn_std20 | turn_mid_prox ICIR 0.87 |
 | 低波动 | lowvol / std20 / downside_vol | 防守底仓主力 |
@@ -91,10 +93,16 @@ python launcher.py
 ## 安装与运行
 
 ```bash
-# 源码
-pip install -r requirements.txt
-python data/demo/build_demo_db.py    # 生成演示数据
-python launcher.py                   # deck:8787 + HARNESS:3080
+# 源码（macOS/Linux）
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+
+# 真实数据（免 Tushare）
+.venv/bin/python -X utf8 data/free_daily_pipeline.py --init --skip-quality --skip-refresh
+.venv/bin/python -X utf8 data/fetch_quality_ths.py --run --quarters 10 --rate 0.10 --workers 2
+.venv/bin/python -X utf8 data/fetcher_finance.py
+.venv/bin/python -X utf8 data/free_daily_pipeline.py
+scripts/run_macos.sh                           # deck:8787 + HARNESS:3080
 
 # 单文件
 QuantDeck.exe                        # 双击即用，自动开浏览器
@@ -113,9 +121,10 @@ DSHQuant-v1.0.9-Release.zip          # 解压即用，含 HARNESS 运行时
 
 数据由用户自行获取。系统不分发数据。
 
-- 行情来自第三方（Tushare 等）。仓库只含获取脚本 + 合成演示数据。
+- 默认行情链免 Tushare：Baostock 日线，腾讯实时快照校验，同花顺财务质量。仓库只含获取脚本 + 合成演示数据。
 - 换手率 2019 年前缺失，2019 前换手类结论作废。
-- 配置：`config/params.yaml.example`（Tushare token）。
+- 配置：`config/params.yaml.example`（Tushare 留空即可）。
+- macOS 运行与数据边界：[macOS 运行指南](docs/macOS运行指南.md)。
 
 ## 许可
 

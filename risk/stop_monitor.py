@@ -31,12 +31,14 @@ BASE = Path(__file__).resolve().parent.parent   # risk/ → deepseek-harness-qua
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
-BARS_DB = r"data/cache/bars.db"
-FIN_TS_DB = r"data/cache/finance_ts.db"
+from data.cache import CACHE_DIR
+
+BARS_DB = CACHE_DIR / "bars.db"
+FIN_TS_DB = CACHE_DIR / "finance_ts.db"
 
 
 def _ro(db):
-    return sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True, timeout=3)
+    return sqlite3.connect(f"{Path(db).resolve().as_uri()}?mode=ro", uri=True, timeout=10)
 
 
 def _latest(files):

@@ -23,7 +23,7 @@ import shutil
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
-TRASH = Path("<home>/Desktop/垃圾桶")
+TRASH = BASE / "data" / "trash"
 TS = re.compile(r"^(.+)_(\d{8}_\d{6})\.(json|md|csv)$")
 # 各模式独立保留数（未列出的走 --keep 默认）
 KEEP_OVERRIDE = {

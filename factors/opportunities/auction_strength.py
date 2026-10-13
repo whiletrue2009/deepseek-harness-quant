@@ -35,7 +35,7 @@ sys.path.insert(0, str(BASE))
 import numpy as np
 import pandas as pd
 
-MINUTE_DIR = Path(r"data/minute/download/1m_price_zip")
+MINUTE_DIR = BASE / "data/minute/download/1m_price_zip"
 OUT = BASE / "logs" / "auction_signal.json"
 ROLL_DAYS = 20          # 量能滚动窗口
 SIGNAL_WINDOW = 5       # 开盘承接窗口（分钟数）
@@ -46,7 +46,7 @@ def list_days(year: int) -> list:
     ★2026-08-10：7z 增量转的 incr_parquet 优先（zip 可能不含最新交易日）
     """
     days = set()
-    incr_dir = Path(r"data/minute/incr_parquet")
+    incr_dir = BASE / "data/minute/incr_parquet"
     if incr_dir.exists():
         for p in incr_dir.glob("*.parquet"):
             if p.stem.startswith(str(year)):
@@ -63,7 +63,7 @@ def read_day(year: int, date8: str) -> pd.DataFrame:
       ② volume → vol（增量列名差异）
       ③ pre_close 缺失（增量无此列）→ 用当日 09:31 前收盘价近似前收（PIT：当日可得）
     """
-    incr = Path(r"data/minute/incr_parquet") / f"{date8}.parquet"
+    incr = BASE / "data/minute/incr_parquet" / f"{date8}.parquet"
     if incr.exists():
         df = pd.read_parquet(incr)
         if "trade_time" in df.columns and df["trade_time"].dtype.kind == "M":

@@ -31,7 +31,7 @@ COST = 0.00026 + 0.0005 + 0.001
 HARD_STOP = -0.07
 HIGH_DD = -0.08
 TOP_N = 10
-MV_MAP_CSV = r"data/cache\circ_mv_map.csv"
+MV_MAP_CSV = r"data/cache/circ_mv_map.csv"
 
 
 def load(limit=200):

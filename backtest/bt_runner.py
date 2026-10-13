@@ -26,7 +26,7 @@ sys.path.insert(0, str(BASE))
 
 from data.cache import DailyCache
 
-CACHE = r"data\cache"
+CACHE = r"data/cache"
 # 缓存（动态回测重复跑用）
 _PANEL = {"key": None, "closes": None}
 _FIN = None

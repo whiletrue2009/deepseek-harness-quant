@@ -23,11 +23,14 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
+from data.cache import CACHE_DIR
+
 LOGS = BASE / "logs"
 REPORT = BASE / "report"
 OUTPUT = BASE / "output"
-UNIFIED = Path(r"data/cache/unified.db")
-EXT_HS = Path(r"data/factorpool/output/health")
+UNIFIED = CACHE_DIR / "unified.db"
+BARS = CACHE_DIR / "bars.db"
+EXT_HS = BASE / "data/factorpool/output/health"
 
 TABLES = {
     "market_daily": """CREATE TABLE IF NOT EXISTS market_daily (
@@ -51,6 +54,10 @@ TABLES = {
     #   min_live_samples=实测样本门槛——低于此数回测主导，达到后实测加权提升
     "evidence_weights": """CREATE TABLE IF NOT EXISTS evidence_weights (
         key TEXT PRIMARY KEY, value REAL, note TEXT, updated TEXT)""",
+    # 免 Tushare 全新安装可能尚未生成外包因子实测库；建空表保证 AI 视图可降级导出。
+    "factor_agg": """CREATE TABLE IF NOT EXISTS factor_agg (
+        factor TEXT PRIMARY KEY, n_pitch INTEGER, n_done_t5 INTEGER,
+        t1_avg REAL, t5_avg REAL, t5_win REAL, excess_avg REAL, srcs TEXT)""",
 }
 
 
@@ -120,11 +127,12 @@ def load_crowding():
 
 
 def load_market_width():
-    """bars.db 算当日涨跌家数 + 成交额（immutable 读，快）"""
+    """bars.db 算当日涨跌家数 + 成交额（普通只读，避免初始化写入期间快照不一致）"""
     try:
         from data.cache import DailyCache
         date = DailyCache().latest_trade_date()
-        con = sqlite3.connect("file:data/cache/bars.db?mode=ro&immutable=1", uri=True, timeout=5)
+        # 初始化进程仍在追加时，immutable 快照可能读到中间页；普通只读连接等待写事务结束。
+        con = sqlite3.connect(f"{BARS.as_uri()}?mode=ro", uri=True, timeout=10)
         rows = con.execute(
             "SELECT SUM(CASE WHEN pct_chg>0 THEN 1 ELSE 0 END), SUM(CASE WHEN pct_chg<0 THEN 1 ELSE 0 END),"
             " SUM(CASE WHEN pct_chg=0 THEN 1 ELSE 0 END),"

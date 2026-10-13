@@ -29,7 +29,7 @@ import sqlite3
 
 from data.cache import DailyCache
 
-CACHE = r"data\cache"
+CACHE = r"data/cache"
 
 
 def _q(sql, db, params=()):

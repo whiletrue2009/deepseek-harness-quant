@@ -24,7 +24,7 @@ from validation.test_regime_classified import (
     load_index, metrics, regime_cash_at, START, END,
 )
 
-HIST_MV_DB = Path(r"data/cache\hist_mv.db")
+HIST_MV_DB = Path(r"data/cache/hist_mv.db")
 MIN_MV_YI = 50.0
 
 

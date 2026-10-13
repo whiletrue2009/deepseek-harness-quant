@@ -27,7 +27,11 @@ import numpy as np
 import pandas as pd
 
 BASE = Path(__file__).resolve().parent.parent
-BARS_DB = r"data/cache/bars.db"
+sys.path.insert(0, str(BASE))
+
+from data.cache import CACHE_DIR
+
+BARS_DB = (CACHE_DIR / "bars.db").resolve().as_uri() + "?mode=ro&immutable=1"
 PARQUET = BASE / "output" / "hs300_monthly.parquet"
 EQ_PARQUET = BASE / "output" / "eq_monthly.parquet"
 OUTPUT = BASE / "output" / "traffic_light.json"
@@ -63,7 +67,7 @@ def _ensure_parquet():
 
 
 def _bars_latest() -> tuple:
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True)
+    con = sqlite3.connect(BARS_DB, uri=True)
     row = con.execute(
         "SELECT date, close FROM daily_bar WHERE code='SH.000300' AND adjust='none' ORDER BY date DESC LIMIT 1").fetchone()
     con.close()
@@ -78,7 +82,7 @@ def load_monthly() -> pd.Series:
         pre = pd.read_parquet(PARQUET)["close"].resample("ME").last()
         pre = pre[pre.index < pd.Timestamp("2019-01-01")]
         parts.append(pre)
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True)
+    con = sqlite3.connect(BARS_DB, uri=True)
     rows = con.execute(
         "SELECT date, close FROM daily_bar WHERE code='SH.000300' AND adjust='none' AND date>='2019-01-01' ORDER BY date").fetchall()
     con.close()
@@ -129,7 +133,7 @@ def load_eq() -> pd.Series:
     """全池等权月收益（bars.db qfq，2010+），缓存 parquet 加速"""
     if EQ_PARQUET.exists():
         return pd.read_parquet(EQ_PARQUET)["eq"]
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True)
+    con = sqlite3.connect(BARS_DB, uri=True)
     df = pd.read_sql("SELECT date, code, close FROM daily_bar WHERE adjust='qfq' AND close>0", con)
     con.close()
     p = df.pivot_table(index="date", columns="code", values="close").sort_index()

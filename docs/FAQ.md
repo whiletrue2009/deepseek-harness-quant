@@ -3,10 +3,10 @@
 ## 启动与依赖
 
 **Q1: 启动 deck_server.py 报 ImportError？**
-先确认依赖装齐：`python -m pip install -r requirements.txt`。若 Python 3.13+ 装不上 vectorbt/quantstats，可先安装最小集（pandas numpy scipy PyYAML akshare requests tqdm）——Web 系统与因子引擎不需要回测增强库。
+先确认使用仓库虚拟环境：`.venv/bin/python -m pip install -r requirements.txt`。若 Python 3.13+ 装不上 vectorbt/quantstats，可先安装最小集（pandas numpy scipy PyYAML akshare requests tqdm）——Web 系统与因子引擎不需要回测增强库。
 
 **Q2: 8787 端口被占用？**
-`netstat -ano | findstr 8787` 找到占用进程，结束它或改端口：`python deck/deck_server.py --port 8888`。
+macOS 用 `lsof -nP -iTCP:8787 -sTCP:LISTEN` 查看占用进程，结束它或改端口：`.venv/bin/python -u deck/deck_server.py --port 8888`。
 
 **Q3: 页面能开但数据全空？**
 数据目录未就绪。检查：`config/params.yaml` 的 `data.cache_dir` 或环境变量 `LWQUANT_CACHE_DIR` 是否指向含 `bars.db` 的目录；或先用演示数据模式（见快速开始 §5）。
@@ -16,11 +16,11 @@
 
 ## 数据
 
-**Q5: fetch_data.py 需要什么？**
-Tushare token（`config/params.yaml` → `data.tushare_token`）。120 积分可拉日线+股票列表；财报/龙虎榜等需更高积分。akshare 免费接口免 token。
+**Q5: 真实数据需要什么 token？**
+默认免 Tushare 链路不需要行情 token：日线和股票清单走 Baostock，实时/估值快照走腾讯，财务质量走同花顺。入口是 `.venv/bin/python -X utf8 data/free_daily_pipeline.py`；首次空缓存建议按《macOS 运行指南》分步初始化。
 
-**Q6: 为什么仓库里没有数据？**
-Tushare 等数据源协议禁止再分发（详见 docs/数据说明.md）。请自行获取；`data/demo/` 提供合成演示数据。
+**Q6: 为什么仓库里没有全量数据？**
+第三方行情与财务数据受授权、体积和再分发限制（详见 docs/数据说明.md）。请用获取脚本落在本机 `data/cache/`；`data/demo/` 只提供合成演示数据。
 
 **Q7: 换手率（turn）2019 年前为什么缺失？**
 历史换手率数据源覆盖有限，2019 年起才 90%+ 覆盖。**请勿用 2019 前数据做换手类因子结论**（项目内所有 turn_low 结论均以 2019-2026 为验证区间）。

@@ -22,11 +22,13 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
+from data.cache import CACHE_DIR
+
 import numpy as np
 import pandas as pd
 import sqlite3
 
-FIN_DB = r"data\cache\finance.db"
+FIN_DB = CACHE_DIR / "finance.db"
 
 # 披露延迟：报告期 → 可用日（月末）
 DISCLOSE_LAG = {

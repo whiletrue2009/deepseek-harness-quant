@@ -3,7 +3,7 @@
 # 复制为 params.yaml 并填写你的配置：
 #   cp params.yaml.example params.yaml
 # 数据目录：默认 data/cache；可用环境变量 LWQUANT_CACHE_DIR 覆盖。
-# Tushare token 请在 https://tushare.pro 注册获取（数据获取脚本见 data/fetch_data.py）。
+# 默认运行方式不依赖 Tushare token；如需接入旧脚本再自行配置。
 # ============================================================
 # ============================================================
 # DeepSeek HARNESS Quant · 全局参数配置（v2.5）
@@ -13,18 +13,20 @@
 
 # ---------- 数据源 ----------
 data:
-  cache_dir: "<your-config>" # 本地缓存（SQLite/Parquet），唯一读取接口；已迁移 D 盘（2026-08-06）
-  cache_dir_note: "<your-config>"
+  cache_dir: "data/cache" # 本地缓存（SQLite/Parquet），唯一读取接口
+  cache_dir_note: "可用环境变量 LWQUANT_CACHE_DIR 覆盖"
   sources:                           # 多源主备
-    daily_primary: "baostock"        # 行情主源（稳）
-    daily_backup: "akshare"          # 行情备源（全）
-    financial_primary: "tushare"     # 财报主源（含公告日 ann_date → PIT）
+    daily_primary: "baostock"        # 日线主源：免 token，含 amount/turn/is_st
+    daily_backup: "ths"              # 可选日线备源；年度接口需按源验活
+    realtime_primary: "tencent"      # 实时快照/市值交叉校验
+    financial_primary: "ths"         # 质量三表；无公告日，非 PIT
     coverage: "akshare"              # 业绩预告/快报/机构调研
-  tushare_token: "<your-config>" # [升级 2026-08-07 主服务器 15000积分+实时竞价]
-  tushare_api_url: "<your-config>" # 主服务器（109 接口，无逐股限频，按日批量 5533 只 3-16s）
+    minute_primary: "mootdx"         # 可选；当前默认管线不写分钟库
+  tushare_token: "" # 留空表示禁用
+  tushare_api_url: "" # 留空表示禁用
   tushare_backup:                                  # 备用服务器（HTTP API 封装，见 data/fetcher_tushare_backup.py）
-    url: "<your-config>"
-    api_key: "<your-config>"
+    url: ""
+    api_key: ""
   jqdata_user: "<your-config>" # 聚宽 JQData 账号（2026-08-14 用户申请）
   jqdata_password: "<your-config>" # 聚宽 JQData 密码
   jqdata_note: "试用/免费版：数据窗口 2025-05-06~2026-05-13（约1年，含 1m/30m/60m 分钟线+申万行业+valuation；无当前实时数据，分钟线仅可用于回测验证周期因子）"

@@ -1,10 +1,11 @@
 # DeepSeek HARNESS Quant · 依赖清单（v2.5）
-# 安装：python -m pip install -r requirements.txt
+# 安装：uv pip install --python .venv/bin/python -r requirements.txt
 
 # ---- 数据源 ----
-baostock>=0.8.9            # 行情主源（稳）
+baostock>=0.8.9            # 日线主源（免 token，OHLC/成交额/换手/历史 ST）
 akshare>=1.15.0            # 覆盖源（业绩快报/机构调研等）
-tushare>=1.4.0             # 财报主源（ann_date → Point-in-Time，需 token）
+requests>=2.32             # 同花顺日线/财务、腾讯实时快照直连
+mootdx>=0.11.7             # 可选分钟/盘口源；使用前必须真实取数验活
 
 # ---- 回测与绩效 ----
 backtrader>=1.9.78         # 主回测引擎（实测通过）
@@ -15,6 +16,8 @@ quantstats>=0.0.81         # 绩效指标（实测通过）
 numpy>=1.26
 pandas>=2.2
 pyyaml>=6.0                # 读取 config/params.yaml
+pyarrow>=16                # 择时历史与 Parquet 缓存
+py7zr>=0.21                # 分钟 7z 增量转 Parquet
 
 # ---- 可选 ----
 matplotlib>=3.8            # 图表

@@ -13,10 +13,11 @@
 用法：
   python data/fetcher_finance.py --limit 50      # 小样本验证（只处理前 50 只）
   python data/fetcher_finance.py                 # 全量（约 40 分钟，幂等 PK code+period）
-  python data/fetcher_finance.py --start 100     # 断点续传（从第 100 只开始）
+  python data/fetcher_finance.py --from-bars     # 旧模式：只处理 bars.db 已有代码
   python data/fetcher_finance.py --status        # 查看进度
 """
 import argparse
+import json
 import sys
 import time
 from datetime import datetime
@@ -32,11 +33,13 @@ warnings.filterwarnings("ignore")
 import pandas as pd
 
 from data.finance_calc import parse_num
+from data.cache import CACHE_DIR
 
-FIN_DB = r"data\cache\finance.db"
+FIN_DB = str(CACHE_DIR / "finance.db")
 LOG_FILE = BASE / "logs" / "finance_load.log"
 PROGRESS_FILE = BASE / "logs" / "finance_progress.txt"
 FAILED_FILE = BASE / "logs" / "finance_failed_codes.json"
+EMPTY_FILE = BASE / "logs" / "finance_empty_codes.json"
 
 
 def log(msg):
@@ -60,8 +63,27 @@ def init_db():
 def fetch_one(code6: str) -> pd.DataFrame:
     """拉取单只股票的财务摘要（按报告期），返回原始 DataFrame"""
     import akshare as ak
-    df = ak.stock_financial_abstract_ths(symbol=code6, indicator="按报告期")
-    return df
+    try:
+        return ak.stock_financial_abstract_ths(symbol=code6, indicator="按报告期")
+    except Exception:
+        # 少量新上市股票的同花顺页面没有 main 节点；东财 F10 字段单位为元，
+        # 继续走 parse_finance 的单位归一和单季差分逻辑。
+        suffix = ".SH" if code6.startswith(("6", "9")) else ".SZ"
+        raw = ak.stock_financial_analysis_indicator_em(
+            symbol=code6 + suffix, indicator="按报告期"
+        )
+        if raw is None or raw.empty:
+            raise
+        return pd.DataFrame(
+            {
+                "报告期": raw["REPORT_DATE"].astype(str).str[:10],
+                "净利润": raw["PARENTNETPROFIT"],
+                "营业总收入": raw["TOTALOPERATEREVE"],
+                "每股收益": raw["EPSJB"],
+                "净资产收益率": raw["ROEJQ"],
+                "source": "akshare_em",
+            }
+        )
 
 
 def parse_finance(code6: str, df: pd.DataFrame) -> list:
@@ -156,19 +178,25 @@ def parse_finance(code6: str, df: pd.DataFrame) -> list:
         rows.append((
             code6, period, net, cum_rev.get(period),
             sqn, sqn_yoy, sqr, sqr_yoy,
-            eps, roe, "akshare_ths"
+            eps, roe, str(r.get("source") or "akshare_ths")
         ))
     return rows
 
 
-def load_codes(limit=None):
-    """从行情缓存取股票代码列表"""
+def load_codes(limit=None, from_bars=False):
+    """默认读全市场股票基础表；可选沿用 bars 小样本模式。"""
     import sqlite3 as s3
-    con = s3.connect(r"data\cache\bars.db")
-    codes = [r[0] for r in con.execute(
-        "SELECT DISTINCT code FROM daily_bar WHERE code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%'")]
-    con.close()
-    codes = [c.split(".")[0] for c in codes]  # 6位代码
+    if from_bars:
+        con = s3.connect(str(CACHE_DIR / "bars.db"))
+        codes = [r[0] for r in con.execute(
+            "SELECT DISTINCT code FROM daily_bar WHERE code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%'")]
+        con.close()
+        codes = [c.split(".")[0] for c in codes]
+    else:
+        con = s3.connect(str(CACHE_DIR / "stock_basic.db"))
+        codes = [r[0][:6] for r in con.execute(
+            "SELECT code FROM stock_basic WHERE status='1' ORDER BY code")]
+        con.close()
     if limit:
         codes = codes[:limit]
     return codes
@@ -178,15 +206,25 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=None, help="只处理前 N 只")
     ap.add_argument("--start", type=int, default=0, help="从第 N 只开始")
+    ap.add_argument("--from-bars", action="store_true",
+                    help="只处理 bars.db 已有代码；默认读 stock_basic.db 全市场")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--retry-failed", action="store_true", help="只补拉上次失败的代码（读 logs/finance_failed_codes.json）")
     args = ap.parse_args()
 
     if args.status:
+        con = init_db()
+        n_rows = con.execute("SELECT COUNT(*) FROM finance_report").fetchone()[0]
+        n_codes = con.execute("SELECT COUNT(DISTINCT code) FROM finance_report").fetchone()[0]
+        con.close()
+        failed, empty = [], []
+        if FAILED_FILE.exists():
+            failed = json.loads(FAILED_FILE.read_text(encoding="utf-8"))
+        if EMPTY_FILE.exists():
+            empty = json.loads(EMPTY_FILE.read_text(encoding="utf-8"))
+        print(f"finance_report: {n_codes} 只 / {n_rows} 期；失败 {len(failed)} 只；空数据 {len(empty)} 只")
         if PROGRESS_FILE.exists():
             print(PROGRESS_FILE.read_text(encoding="utf-8"))
-        else:
-            print("尚无财报下载进度")
         return 0
 
     # ★#394 失败代码落盘 + --retry-failed 定向补拉（免费接口限流常致大量失败，补拉避开全量重跑）
@@ -201,15 +239,21 @@ def main():
             return 0
         log(f"定向补拉：{len(codes)} 只上次失败的代码")
     else:
-        codes = load_codes(args.limit)
+        codes = load_codes(args.limit, args.from_bars)
     total = len(codes)
     if args.start > 0:
         codes = codes[args.start:]
-    log(f"财报批量下载: 共 {total} 只，本次处理 {len(codes)} 只（start={args.start}）")
 
     con = init_db()
+    done_db = {r[0] for r in con.execute("SELECT DISTINCT code FROM finance_report").fetchall()}
+    empty = set()
+    if EMPTY_FILE.exists():
+        empty = set(json.loads(EMPTY_FILE.read_text(encoding="utf-8")))
+    codes = [c for c in codes if c not in done_db and c not in empty]
+    log(f"财报批量下载: 共 {total} 只，本次处理 {len(codes)} 只（start={args.start}）")
+
     t0 = time.time()
-    done, fail, empty = 0, [], 0
+    done, fail = 0, []
 
     for i, code in enumerate(codes):
         # ★#393 限流防护：0.30s 间隔把有效速率压到 ~2只/s（AkShare 同花顺免费接口限流——
@@ -219,7 +263,7 @@ def main():
             df = fetch_one(code)
             rows = parse_finance(code, df)
             if not rows:
-                empty += 1
+                empty.add(code)
                 continue
             con.executemany(
                 "INSERT OR REPLACE INTO finance_report VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
@@ -237,6 +281,8 @@ def main():
                     con.commit()
                     done += 1
                     continue
+                empty.add(code)
+                continue
             except Exception:
                 pass
             fail.append((code, str(e)[:60]))
@@ -244,7 +290,7 @@ def main():
             el = time.time() - t0
             rate = (i + 1) / el
             eta = (len(codes) - i - 1) / rate if rate > 0 else 0
-            log(f"[进度] {i+1}/{len(codes)} 成功{done} 空{empty} 失败{len(fail)} "
+            log(f"[进度] {i+1}/{len(codes)} 成功{done} 空{len(empty)} 失败{len(fail)} "
                 f"速率{rate:.2f}只/s 剩余约{eta/60:.0f}分钟")
         if (i + 1) % 100 == 0:
             PROGRESS_FILE.write_text(
@@ -255,8 +301,10 @@ def main():
     n_rows = con.execute("SELECT COUNT(*) FROM finance_report").fetchone()[0]
     n_codes = con.execute("SELECT COUNT(DISTINCT code) FROM finance_report").fetchone()[0]
     con.close()
-    log(f"== 财报下载完成 == 处理 {len(codes)} 只，成功 {done}，空 {empty}，失败 {len(fail)}，"
+    log(f"== 财报下载完成 == 处理 {len(codes)} 只，成功 {done}，空 {len(empty)}，失败 {len(fail)}，"
         f"耗时 {el/60:.1f} 分钟 | 库内 {n_codes} 只 {n_rows} 行")
+    EMPTY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    EMPTY_FILE.write_text(json.dumps(sorted(empty), ensure_ascii=False), encoding="utf-8")
     if fail:
         log(f"失败清单（前20）: {fail[:20]}")
         # ★#394 失败代码落盘（供 --retry-failed 定向补拉）

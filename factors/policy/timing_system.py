@@ -34,7 +34,8 @@ BASE = Path(__file__).resolve().parent.parent.parent
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
-BARS_DB = r"data/cache/bars.db"
+BARS_DB = BASE / "data" / "cache" / "bars.db"
+MACRO_DB = BASE / "data" / "cache" / "macro.db"
 OUT_DIR = BASE / "output"
 
 
@@ -48,7 +49,7 @@ def _f(v):
 
 
 def _bars_conn():
-    return sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    return sqlite3.connect(f"file:{BARS_DB}?mode=ro", uri=True, timeout=10)
 
 
 # ★2026-08-12 #135：双库合并探测（#102 教训复发点修复）
@@ -73,7 +74,7 @@ def _merged_max_date() -> str:
         from pathlib import Path as _P
         for _p in sorted(_P(BARS_DB).parent.glob("bars_incr_*.db"))[-3:]:
             try:
-                conns.append(sqlite3.connect(f"file:{_p}?mode=ro&immutable=1", uri=True, timeout=3))
+                conns.append(sqlite3.connect(f"file:{_p}?mode=ro", uri=True, timeout=10))
             except Exception:
                 pass
     except Exception:
@@ -186,11 +187,10 @@ def macro_score() -> dict:
         _rl_cn = {"strong_uptrend": "强势上行", "uptrend": "上行", "choppy": "震荡",
                   "downtrend": "下行", "strong_downtrend": "弱势下行"}.get(rl, "中性")
         note = f"Regime={rl}"
-        # ★#105 真实宏观库修正（macro.db immutable）
+        # ★#105 真实宏观库
         try:
             import sqlite3 as _sq
-            _con = _sq.connect("file:data/cache/macro.db?mode=ro&immutable=1",
-                               uri=True, timeout=3)
+            _con = _sq.connect(f"file:{MACRO_DB}?mode=ro", uri=True, timeout=10)
             # 社融趋势（近3月均 vs 近6月均；1 月季节性冲高用 6 月整体基准平滑）
             _sf = [r[0] for r in _con.execute(
                 "SELECT sf_increment FROM social_finance ORDER BY month DESC LIMIT 6").fetchall()]

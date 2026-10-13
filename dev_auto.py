@@ -439,17 +439,20 @@ def run_update():
         log(f"看板更新: exit={r2.returncode} {((r2.stdout or '')[-200:]).strip()}")
     except Exception as e:
         log(f"每日信号/看板失败: {e}")
-    # 4) Tushare 精确版历史市值增量（--one：每轮尝试拉 1 个月，72 轮 ≈ 12 天补齐 hist_mv_ts，
-    #    与后台连续版互不冲突；反推版 hist_mv 已用于 PIT 验收）
+    # 4) 本地历史市值增量：用成交额 / 换手率反推，不读取 Tushare token。
     try:
         import subprocess
         r3 = subprocess.run(
-            [sys.executable, "-X", "utf8", str(BASE / "data" / "fetcher_hist_mv.py"), "--one"],
-            capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
+            [
+                sys.executable, "-X", "utf8", str(BASE / "data" / "build_hist_mv.py"),
+                "--start", datetime.now().strftime("%Y-%m"),
+            ],
+            capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace",
+        )
         out3 = (r3.stdout or "")[-300:].strip()
-        log(f"Tushare 市值增量: {out3.splitlines()[-1] if out3 else '无输出'}")
+        log(f"历史市值反推增量: {out3.splitlines()[-1] if out3 else '无输出'}")
     except Exception as e:
-        log(f"Tushare 市值增量失败: {e}")
+        log(f"历史市值反推增量失败: {e}")
     # 5) 模拟盘信号跟踪（S1：每日 v3 信号 → 模拟净值累积，幂等）
     try:
         import subprocess
@@ -857,7 +860,7 @@ def run_update():
         health_check()
     except Exception as e:
         log(f"健康巡检失败: {e}")
-    log("数据更新: 本轮完成（审计 + 因子池 + 信号 + 看板 + Tushare 增量 + 模拟盘 + 指数增量 + 精选排名 + 动态择时 + 机会扫描 + Pitch Deck + 健康巡检）")
+    log("数据更新: 本轮完成（审计 + 因子池 + 信号 + 看板 + 历史市值增量 + 模拟盘 + 指数增量 + 精选排名 + 动态择时 + 机会扫描 + Pitch Deck + 健康巡检）")
 
 
 def run_sched():
@@ -892,7 +895,7 @@ def run_sched():
     # 生成 AI 待办
     progress_text = PROGRESS.read_text(encoding="utf-8") if PROGRESS.exists() else ""
     todos = []
-    if "fetcher_tushare" not in progress_text or "下一步：写 `data/fetcher_tushare.py`" in progress_text:
+    if False:
         todos.append("M1 收尾：写 data/fetcher_tushare.py（复权因子/市值/股票列表，免费积分可用项），跑通后做 M1 验收 demo（单只三源一致性 + 财报校验挂接）")
     elif "M2 全市场数据入库" in progress_text and "下一步：写 `data/bulk_loader.py`" in progress_text:
         todos.append("M2 全市场入库：写 data/bulk_loader.py（批量下载器：多源主备 + 断点续传 + 进度日志），先小样本 50 只验证速率，再全量 5538 只（夜间分片跑）")

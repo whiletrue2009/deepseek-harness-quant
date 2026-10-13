@@ -30,7 +30,7 @@ LOGS = BASE / "logs"
 PY = sys.executable
 
 # 自动程序标识（命中即拒绝手动更新）
-AUTO_SCRIPTS = ("dev_auto.py", "daily_pipeline.py")
+AUTO_SCRIPTS = ("dev_auto.py", "daily_pipeline.py", "free_daily_pipeline.py")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -99,7 +99,7 @@ def check_busy():
         return True, f"手动更新运行中（{st.get('started_at', '')} 启动）", st
     # 2) 自动程序在跑
     if _auto_running():
-        return True, "自动程序运行中（dev_auto / daily_pipeline），手动更新已自动禁用", {}
+        return True, "自动程序运行中（dev_auto / daily_pipeline / free_daily_pipeline），手动更新已自动禁用", {}
     return False, "", {}
 
 

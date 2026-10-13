@@ -11,7 +11,7 @@ from backtest.bt_engine import BtEngine
 from factors.factor_engine import FACTOR_FUNCS
 
 eng = BtEngine(topn=10)
-con = sqlite3.connect(r"data/cache\bars.db")
+con = sqlite3.connect(r"data/cache/bars.db")
 codes = [r[0] for r in con.execute("SELECT DISTINCT code FROM daily_bar")][:200]
 con.close()
 closes = eng.load_panel(codes)

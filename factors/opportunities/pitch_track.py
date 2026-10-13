@@ -38,7 +38,10 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent.parent   # factors/opportunities/ → deepseek-harness-quant
 sys.path.insert(0, str(BASE))
 
-BARS_DB = Path(r"data/cache/bars.db")
+from data.cache import CACHE_DIR
+
+BARS_DB = CACHE_DIR / "bars.db"
+BASIC_DB = CACHE_DIR / "stock_basic.db"
 FWD_HORIZONS = (1, 5, 20, 60)
 
 
@@ -83,20 +86,20 @@ def append_pitch(pitch_file) -> dict:
     # ★entry_date 用 pool_date（pitch 基于的数据日期）而非 date（生成日）；异常回退 bars 最近交易日
     entry_date = d.get("pool_date") or d.get("date") or datetime.now().strftime("%Y-%m-%d")
     try:
-        # ★2026-08-11 修复：普通连接 D 盘 bars.db 等锁 20s+（实测 append_pitch 26.4s）→ immutable 秒开
+        # 只读连接等待短写锁，避免初始化进行时读到中间页。
         # ★#143 双库合并探测：主库写保护后增量库含最新日（08-12 的 entry 不能被错截为 08-11）
         from data.cache import DailyCache as _DC
         _mx = _DC().latest_trade_date()
         if not _mx:
-            con0 = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+            con0 = sqlite3.connect(f"file:{BARS_DB.as_posix()}?mode=ro", uri=True, timeout=10)
             _mx = con0.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
             con0.close()
         if _mx and entry_date > _mx:   # pool_date 虚标未来（如 08-10 > 08-07）→ 用最近交易日
             entry_date = _mx
     except Exception:
         pass
-    # 入池日收盘（bars.db，immutable 只读连接秒开）
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    # 入池日收盘（bars.db 只读）
+    con = sqlite3.connect(f"file:{BARS_DB.as_posix()}?mode=ro", uri=True, timeout=10)
     # ★2026-08-11 问题 5：跨日重复累积（同 code 多条）→ 按 code 唯一去重，保留最早入池条目
     existing_codes = {e["code"] for e in pool["entries"]}
     added = 0
@@ -200,19 +203,19 @@ def update_fwd() -> dict:
     if not pool["entries"]:
         print("Pitch 远期池: 空池")
         return pool
-    # 主库 + 最近 3 个增量库（immutable）
+    # 主库 + 最近 3 个增量库
     conns = []
     try:
-        conns.append(("main", sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1",
-                                              uri=True, timeout=3)))
+        conns.append(("main", sqlite3.connect(f"file:{BARS_DB.as_posix()}?mode=ro",
+                                              uri=True, timeout=10)))
     except Exception:
         pass
     try:
         from data.cache import CACHE_DIR
         for _p in sorted(CACHE_DIR.glob("bars_incr_*.db"))[-3:]:
             try:
-                conns.append((_p.name, sqlite3.connect(f"file:{_p.as_posix()}?mode=ro&immutable=1",
-                                                       uri=True, timeout=3)))
+                conns.append((_p.name, sqlite3.connect(f"file:{_p.as_posix()}?mode=ro",
+                                                       uri=True, timeout=10)))
             except Exception:
                 continue
     except Exception:
@@ -363,7 +366,7 @@ def append_machine_top01(n_top: int = 5) -> dict:
     # ★2026-08-13 #321：机器池股票来自 ext_hits 共识（不在 pitch_v2）→ name 从全市场名表补
     _basic_names = {}
     try:
-        _bc = sqlite3.connect("file:data/cache/stock_basic.db?mode=ro&immutable=1", uri=True, timeout=3)
+        _bc = sqlite3.connect(f"file:{BASIC_DB.as_posix()}?mode=ro", uri=True, timeout=10)
         _basic_names = dict(_bc.execute("SELECT code, name FROM stock_basic").fetchall())
         _bc.close()
     except Exception:
@@ -397,7 +400,7 @@ def append_machine_top01(n_top: int = 5) -> dict:
         _MATRIX = _load_stop_matrix()
     except Exception:
         _MATRIX = {}
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    con = sqlite3.connect(f"file:{BARS_DB.as_posix()}?mode=ro", uri=True, timeout=10)
     existing = {e["code"] for e in pool["entries"]}
     added = 0
     for code in codes:
@@ -475,7 +478,7 @@ def append_human_select() -> dict:
     if not decisions:
         print("人工池: 无人工 buy 记录")
         return pool
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    con = sqlite3.connect(f"file:{BARS_DB.as_posix()}?mode=ro", uri=True, timeout=10)
     existing = {e["code"] for e in pool["entries"]}
     added = 0
     for r in decisions:
@@ -546,13 +549,13 @@ def append_niu_select(persona: str, picks: list, date: str = "",
     # 名称补全（stock_basic）
     _basic_names = {}
     try:
-        _bc = sqlite3.connect("file:data/cache/stock_basic.db?mode=ro&immutable=1",
-                              uri=True, timeout=3)
+        _bc = sqlite3.connect(f"file:{BASIC_DB.as_posix()}?mode=ro",
+                              uri=True, timeout=10)
         _basic_names = dict(_bc.execute("SELECT code, name FROM stock_basic").fetchall())
         _bc.close()
     except Exception:
         pass
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    con = sqlite3.connect(f"file:{BARS_DB.as_posix()}?mode=ro", uri=True, timeout=10)
     added = rechecked = 0
     for pk in picks:
         code = str(pk.get("code") or "").strip()

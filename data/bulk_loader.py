@@ -35,6 +35,12 @@ LOCK_FILE = Path(__file__).resolve().parent / "logs" / "bulk_load.lock"
 
 def _pid_alive(pid: int) -> bool:
     """检查 PID 对应的进程是否存活（Windows tasklist 查询）"""
+    if __import__("os").name != "nt":
+        try:
+            __import__("os").kill(pid, 0)
+            return True
+        except OSError:
+            return False
     try:
         import subprocess
         r = subprocess.run(

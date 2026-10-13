@@ -24,7 +24,7 @@ from validation.test_regime_classified import (
     load_index, metrics, regime_cash_at, START, END,
 )
 
-MV_MAP_CSV = Path(r"data/cache\circ_mv_map_full.csv")
+MV_MAP_CSV = Path(r"data/cache/circ_mv_map_full.csv")
 
 
 def load_pool(limit=None):

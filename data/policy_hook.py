@@ -11,6 +11,7 @@
   当前状态：2026-06 score +0.21 中性区 → 0 干预（无害过渡）。
 """
 import json
+import math
 import sys
 import time
 from datetime import datetime
@@ -49,8 +50,9 @@ def load() -> dict:
     if OUT.exists() and now - OUT.stat().st_mtime < _TTL:
         try:
             d = json.loads(OUT.read_text(encoding="utf-8"))
-            _cache.update({"ts": now, "data": d})
-            return d
+            if isinstance(d.get("score"), (int, float)) and math.isfinite(float(d["score"])):
+                _cache.update({"ts": now, "data": d})
+                return d
         except Exception:
             pass
     d = _compute()

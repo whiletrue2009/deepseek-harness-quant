@@ -24,7 +24,10 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
-BARS_DB = r"data\cache\bars.db"
+from data.cache import CACHE_DIR
+from data.cache import DailyCache
+
+BARS_DB = CACHE_DIR / "bars.db"
 
 # (名称, glob 模式, 目录, 期望最大时效(小时), 说明)
 CHAINS = [
@@ -75,6 +78,10 @@ def check_tasks() -> list:
     names = ["DSHQuant-DevDriver", "DSHQuant-DailyPipeline", "DSHQuant-FactorDaily",
              "DSHQuant-FactorArchive", "DSHQuant-DeckGuard", "DSHQuant-BreakoutMon"]
     rows = []
+    if os.name != "nt":
+        return [{"name": n, "ok": False,
+                 "issue": "macOS 未配置计划任务（当前为手动运行）"}
+                for n in names]
     for n in names:
         r = subprocess.run(["schtasks", "/query", "/tn", n], capture_output=True,
                            text=True, errors="replace")
@@ -100,14 +107,34 @@ def check_deck() -> dict:
 
 def check_db() -> dict:
     out = {}
-    try:
-        con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
-        out["bars_latest"] = con.execute(
-            "SELECT MAX(date) FROM daily_bar WHERE adjust='qfq'").fetchone()[0]
-        out["n_inc_db"] = len(glob.glob(r"data\cache\bars_incr_*.db"))
-        con.close()
-    except Exception as e:
-        out["error"] = str(e)[:80]
+    cache = DailyCache()
+    paths = [BARS_DB] + cache._inc_paths()
+    dates = []
+    errors = []
+    for path in paths:
+        if not path.exists():
+            continue
+        # 初始化进程可能正在提交；immutable 快照会偶发 malformed，普通只读跟随 WAL/提交状态。
+        for attempt in range(3):
+            try:
+                con = sqlite3.connect(
+                    f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=3)
+                try:
+                    row = con.execute(
+                        "SELECT MAX(date) FROM daily_bar WHERE adjust='qfq'"
+                    ).fetchone()
+                    if row and row[0]:
+                        dates.append(row[0])
+                finally:
+                    con.close()
+                break
+            except Exception as e:
+                errors.append(f"{path.name}:{str(e)[:40]}")
+                time.sleep(0.2 * (attempt + 1))
+    out["bars_latest"] = max(dates) if dates else None
+    out["n_inc_db"] = len(cache._inc_paths())
+    if errors and not dates:
+        out["error"] = errors[-1]
     return out
 
 

@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 MINUTE_DIR = Path(r"data/minute/download/1m_price_zip")
-BARS_DB = r"data/cache\bars.db"
+BARS_DB = r"data/cache/bars.db"
 SIGNAL_JSON = BASE / "logs" / "auction_signal.json"
 OUT_JSON = BASE / "logs" / "auction_backtest_result.json"
 HORIZONS = [1, 5, 20]

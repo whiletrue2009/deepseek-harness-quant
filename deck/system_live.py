@@ -9,6 +9,7 @@
   5. deck: 自身状态
 """
 import json
+import os
 import re
 import socket
 import subprocess
@@ -17,13 +18,17 @@ import time
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
+if str(BASE) not in sys.path:
+    sys.path.insert(0, str(BASE))
+
+from data.cache import CACHE_DIR
 
 DBS = {
-    "bars": r"data/cache/bars.db",
-    "finance": r"data/cache/finance.db",
-    "finance_quality": r"data/cache/finance_quality.db",
-    "minute": r"data/cache/minute.db",
-    "hist_mv": r"data/cache/hist_mv.db",
+    "bars": str(CACHE_DIR / "bars.db"),
+    "finance": str(CACHE_DIR / "finance.db"),
+    "finance_quality": str(CACHE_DIR / "finance_quality.db"),
+    "minute": str(CACHE_DIR / "minute.db"),
+    "hist_mv": str(CACHE_DIR / "hist_mv.db"),
 }
 
 SCHEDULED_TASKS = [
@@ -44,7 +49,7 @@ def _probe_one(name, path):
     t0 = time.time()
     try:
         # ★2026-08-10：mode=ro&immutable=1 → 只读快照连接，不等写锁（库被占用也能即时探测）
-        uri = f"file:{path}?mode=ro&immutable=1"
+        uri = Path(path).resolve().as_uri() + "?mode=ro&immutable=1"
         con = sqlite3.connect(uri, uri=True, timeout=0.2)
         tabs = con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -104,6 +109,12 @@ def _scheduled() -> dict:
     if _sched_cache["data"] is not None and now - _sched_cache["ts"] < 300:
         return _sched_cache["data"]
     out = {}
+    if os.name != "nt":
+        for name, desc in SCHEDULED_TASKS:
+            out[name] = {"desc": desc, "next": "未配置（macOS 暂为手动运行）"}
+        _sched_cache["ts"] = now
+        _sched_cache["data"] = out
+        return out
     for name, desc in SCHEDULED_TASKS:
         try:
             r = subprocess.run(["schtasks", "/Query", "/TN", name, "/FO", "LIST", "/V"],
@@ -155,10 +166,19 @@ def _api_health() -> dict:
 
 
 def _deck_pid() -> int:
+    port = os.environ.get("LWQUANT_DECK_PORT", "8787")
+    if os.name != "nt":
+        try:
+            r = subprocess.run(["lsof", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                               capture_output=True, text=True, errors="replace", timeout=5)
+            pid = (r.stdout or "").strip().splitlines()[0]
+            return int(pid) if pid.isdigit() else 0
+        except Exception:
+            return 0
     try:
         r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, errors="replace", timeout=15)
         for line in r.stdout.splitlines():
-            if ":8787" in line and "LISTENING" in line:
+            if f":{port}" in line and "LISTENING" in line:
                 return int(line.split()[-1])
     except Exception:
         pass
@@ -193,6 +213,8 @@ def _next_schedule() -> list:
     月份/日期不补零），strptime 在部分环境解析失败或类型异常导致 portal_dash 间歇 500。
     改为容错解析：手写拆分（年/月/日/时/分/秒）→ datetime；任何失败返回 None 不抛错。"""
     out = []
+    if os.name != "nt":
+        return out
     try:
         import re as _re
         from datetime import datetime as _dt

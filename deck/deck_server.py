@@ -6,7 +6,7 @@
 
 用法：
   cd DSHQuant
-  NO_PROXY=* ./.venv/Scripts/python.exe deck/deck_server.py [--port 8787]
+  NO_PROXY=* ./.venv/bin/python deck/deck_server.py [--port 8787]
   浏览器打开 http://127.0.0.1:8787/deck.html      （Deck 审批界面）
                http://127.0.0.1:8787/dashboard.html （看板总览）
 
@@ -1208,6 +1208,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else PORT
+    import os
+    os.environ["LWQUANT_DECK_PORT"] = str(port)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"★ Deck/看板 服务器已启动：http://127.0.0.1:{port}/deck.html")
     print(f"  看板：http://127.0.0.1:{port}/dashboard.html  （Ctrl+C 退出）")

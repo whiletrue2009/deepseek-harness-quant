@@ -34,8 +34,8 @@ from strategy.timing import RegimeDetector
 # ---- 硬过滤参数（params.yaml strategy_v3 段优先，改配置不改代码）----
 MIN_MV_YI = 0.0             # ★PIT 验收后归 0：市值过滤证实为 look-ahead 幻觉（快照口径 0.95 虚高，真实 PIT 下 0.74→0.57 负贡献）
 MIN_TURNOVER_YI = 0.1       # 日均成交额下限 0.1 亿（流动性）
-DELISTED_CSV = Path(r"data\cache\delisted_list.csv")
-MV_MAP_CSV = Path(r"data\cache\circ_mv_map_full.csv")
+DELISTED_CSV = Path(r"data/cache/delisted_list.csv")
+MV_MAP_CSV = Path(r"data/cache/circ_mv_map_full.csv")
 
 _MV_MAP = None
 

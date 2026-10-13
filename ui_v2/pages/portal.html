@@ -588,7 +588,7 @@
     prog.style.display = 'flex';
     fill.style.width = '8%';
     pct.textContent = '触发中';
-    box.innerHTML = '<div class="mini">正在触发完整数据管道（Tushare 增量 + 择时 + 扫描 + Pitch + 看板）…</div>';
+    box.innerHTML = '<div class="mini">正在触发完整数据管道（Baostock 日线增量 + 择时 + 扫描 + Pitch + 看板）…</div>';
 
     var finish = function (summaryHtml, pctTxt) {
       LW.api.get('/api/live/chain_refresh', { bypass: true, timeout: 20000 }).then(function (d) {

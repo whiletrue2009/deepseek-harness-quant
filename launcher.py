@@ -82,13 +82,13 @@ def _open_browsers():
 def main():
     base = base_dir()
     if not os.environ.get("LWQUANT_CACHE_DIR"):
-        os.environ["LWQUANT_CACHE_DIR"] = str(base / "data")
+        os.environ["LWQUANT_CACHE_DIR"] = str(base / "data" / "cache")
     data_dir = os.environ["LWQUANT_CACHE_DIR"]
     print(f"[QuantDeck] 数据目录: {data_dir}")
     if not (Path(data_dir) / "bars.db").exists():
         print("[QuantDeck] 提示: 未检测到 bars.db —— 请先获取数据（docs/快速开始.md §3），或使用演示数据模式")
 
-    start_harness(base)                 # HARNESS（可选，:3080）
+    harness_proc = start_harness(base)  # HARNESS（可选，:3080）
     threading.Thread(target=_open_browsers, daemon=True).start()
 
     from deck.deck_server import Handler, PORT
@@ -102,6 +102,8 @@ def main():
         pass
     finally:
         srv.server_close()
+        if harness_proc is not None and harness_proc.poll() is None:
+            harness_proc.terminate()
 
 
 if __name__ == "__main__":

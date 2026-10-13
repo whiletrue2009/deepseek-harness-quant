@@ -29,7 +29,9 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent.parent   # factors/opportunities/ → deepseek-harness-quant
 sys.path.insert(0, str(BASE))
 
-BARS_DB = r"data/cache/bars.db"
+from data.cache import CACHE_DIR
+
+BARS_DB = CACHE_DIR / "bars.db"
 
 
 def check_breakouts(date: str = None) -> list:
@@ -73,19 +75,55 @@ def _load_alerts() -> dict:
     return {"ts": "", "date": "", "codes": [], "history": []}
 
 
+def _write_empty(reason: str) -> Path:
+    """无数据时也落盘合法 JSON，避免调用方读取不存在的历史占位文件。"""
+    logs_dir = BASE / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    out = {
+        "ts": now,
+        "date": "",
+        "n_current": 0,
+        "n_new": 0,
+        "codes": [],
+        "new_hits": [],
+        "history": [],
+        "note": f"突破监控未执行：{reason}",
+    }
+    payload = json.dumps(out, ensure_ascii=False)
+    p = logs_dir / f"breakout_alerts_{ts}.json"
+    p.write_text(payload, encoding="utf-8")
+    try:
+        (logs_dir / "breakout_alerts.json").write_text(payload, encoding="utf-8")
+    except Exception:
+        pass
+    return p
+
+
 def run() -> Path:
     from factors.opportunities import scan as S
     # ★2026-08-10 双库合并探测：主库 + 增量库取最新（直连主库会停在 08-07）
+    last_date = None
     try:
         from data.cache import DailyCache
         last_date = DailyCache().latest_trade_date()
-    except Exception:
-        import sqlite3 as sq
-        con = sq.connect(BARS_DB)
-        last_date = con.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
-        con.close()
+    except Exception as e:
+        print(f"  [日期探测] DailyCache 失败，降级直查 bars.db：{str(e)[:80]}")
     if not last_date:
-        return BASE / "logs" / "breakout_alerts_empty.json"
+        # 初始化写入进程活跃时，DailyCache 的完整性门槛可能返回空；
+        # 监控只需要当前库内最大日期，普通只读连接足够。
+        try:
+            con = sqlite3.connect(BARS_DB, timeout=10)
+            try:
+                row = con.execute("SELECT MAX(date) FROM daily_bar").fetchone()
+                last_date = row[0] if row else None
+            finally:
+                con.close()
+        except Exception as e:
+            print(f"  [日期探测] bars.db 直查失败：{str(e)[:80]}")
+    if not last_date:
+        return _write_empty("bars.db 未返回可用交易日")
 
     hits = check_breakouts(last_date)
     prev = _load_alerts()

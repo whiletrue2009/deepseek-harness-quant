@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """data/backfill_delisted.py — 数据修复 F-2：补拉 2019 后终止上市的退市股（消除幸存者偏差）
 
-背景（2026-08-07 数据审计 A3）：delisted_list.csv 中终止上市 ≥ 2019-01-01 共 148 只，
+背景（2026-08-07 数据审计 A3）：股票基础库中终止上市 ≥ 2019-01-01 的沪深股票
      缓存覆盖 0 只 → 回测池只含"活着的股票" → 收益虚高/回撤低估。
 方案：baostock 支持退市股历史行情（已实测 600068 葛洲坝 qfq 可拉到最后交易日 2021-09-13），
      逐只拉取 [max(上市日, 2019-01-01), 终止上市日] 前复权日线 → 写 daily_bar（复用修复后
@@ -16,11 +16,10 @@
 用法：
   python data/backfill_delisted.py --dry-run    # 前 10 只验证（只读）
   python data/backfill_delisted.py --limit 20   # 部分
-  python data/backfill_delisted.py              # 全量 148 只（预计 10-20 分钟）
+  python data/backfill_delisted.py              # 全量退市股（预计 10-20 分钟）
   python data/backfill_delisted.py --status
 """
 import argparse
-import csv
 import multiprocessing
 import os
 import sqlite3
@@ -37,11 +36,10 @@ for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy",
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
-from data.cache import DailyCache
+from data.cache import CACHE_DIR, DailyCache
 from data.fetcher_baostock import fetch_daily  # 已修复 isST 解析（F-1）
 
-CACHE_DIR = Path(r"data\cache")
-DELISTED_CSV = CACHE_DIR / "delisted_list.csv"
+STOCK_DB = CACHE_DIR / "stock_basic.db"
 LOG_DIR = BASE / "logs"
 PROGRESS_FILE = LOG_DIR / "backfill_delisted_progress.txt"
 FAILED_FILE = LOG_DIR / "backfill_delisted_failed.csv"
@@ -67,32 +65,51 @@ def to_std(code6: str) -> str:
 
 
 def load_targets(limit=None, dry_run=False):
-    """读退市清单 → [(std_code, name, start, end)]，仅 2019 后终止上市
-    end 优先取终止上市日期，缺失则回退暂停上市日期（吸收合并/换股退市走该字段，如 600068 葛洲坝）"""
-    targets = []
-    with open(DELISTED_CSV, encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            end = (row.get("终止上市日期") or "").strip()
-            if not end:
-                end = (row.get("暂停上市日期") or "").strip()
-            if not end or end < START_BASE:
-                continue
-            std = to_std(row.get("code") or row.get("证券代码") or "")
-            if std is None:
-                continue
-            start = (row.get("上市日期") or "").strip()
-            start = max(start, START_BASE) if start >= "2000-01-01" else START_BASE
-            targets.append((std, (row.get("公司简称") or row.get("证券简称") or "").strip(),
-                            start, end))
-    # 去重 + 排除已在缓存的
-    seen, out = set(), []
-    for t in targets:
-        if t[0] not in seen:
-            seen.add(t[0])
-            out.append(t)
-    if limit:
-        out = out[:limit]
-    return out
+    """读股票基础库 → [(code, name, start, end)]，仅 2019 后终止上市的沪深股票。"""
+    if not STOCK_DB.exists():
+        raise FileNotFoundError(f"缺少股票基础库: {STOCK_DB}")
+    con = sqlite3.connect(STOCK_DB)
+    rows = con.execute(
+        """
+        SELECT code, name, ipo_date, out_date
+        FROM stock_basic
+        WHERE status='0' AND out_date>=? AND out_date!=''
+          AND (code LIKE '%.SH' OR code LIKE '%.SZ')
+        ORDER BY code
+        """,
+        (START_BASE,),
+    ).fetchall()
+    con.close()
+    targets = [
+        (code, str(name or ""), max(str(ipo or ""), START_BASE), str(end))
+        for code, name, ipo, end in rows
+    ]
+    return targets[:limit] if limit is not None else targets
+
+
+def cached_codes(cache: DailyCache) -> set[str]:
+    """从主库和增量库读取已有代码，避免重复补拉旧任务已写入的退市股。"""
+    codes: set[str] = set()
+    for path in cache._inc_paths() + [cache.db_path]:
+        if not Path(path).exists():
+            continue
+        con = sqlite3.connect(f"file:{Path(path).resolve()}?mode=ro", uri=True, timeout=5)
+        try:
+            for raw, in con.execute("SELECT DISTINCT code FROM daily_bar").fetchall():
+                s = str(raw)
+                low = s.lower()
+                if low.startswith("sh."):
+                    codes.add(s[3:].upper() + ".SH")
+                elif low.startswith("sz."):
+                    codes.add(s[3:].upper() + ".SZ")
+                elif s.endswith((".SH", ".SZ")):
+                    codes.add(s.upper())
+                elif s[:6].isdigit():
+                    suffix = ".SH" if s[0] in ("6", "9") else ".SZ"
+                    codes.add(s[:6] + suffix)
+        finally:
+            con.close()
+    return codes
 
 
 def fetch_and_store(std_code, start, end, cache: DailyCache, dry_run=False):
@@ -127,6 +144,7 @@ def run(dry_run=False, limit=None):
     done = set()
     if PROGRESS_FILE.exists():
         done = {l.strip() for l in PROGRESS_FILE.read_text(encoding="utf-8").splitlines() if l.strip()}
+    done.update(cached_codes(cache))
     todo = [t for t in targets if t[0] not in done]
 
     if dry_run:
@@ -198,11 +216,16 @@ def run(dry_run=False, limit=None):
 
 
 def status():
-    done = set()
+    progress = set()
     if PROGRESS_FILE.exists():
-        done = {l.strip() for l in PROGRESS_FILE.read_text(encoding="utf-8").splitlines() if l.strip()}
+        progress = {l.strip() for l in PROGRESS_FILE.read_text(encoding="utf-8").splitlines() if l.strip()}
     total = len(load_targets())
-    print(f"进度: {len(done)} / {total}（剩余 {total - len(done)}）")
+    targets = {t[0] for t in load_targets()}
+    covered = targets & cached_codes(DailyCache())
+    print(
+        f"进度: 实际覆盖 {len(covered)} / {total}（剩余 {total - len(covered)}；"
+        f"专用进度文件 {len(progress & targets)}）"
+    )
     if FAILED_FILE.exists():
         print(f"失败清单 {FAILED_FILE} 存在")
 

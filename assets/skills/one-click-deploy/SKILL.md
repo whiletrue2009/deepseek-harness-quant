@@ -15,8 +15,8 @@ metadata:
 
 ## 〇、部署前检查（第 0 步，自动执行不问用户）
 
-1. 确认 Python ≥ 3.11：`python --version`
-2. 确认依赖可装：`pip install -r requirements.txt`（失败则给出系统级提示）
+1. 确认仓库虚拟环境存在：`.venv/bin/python --version`（Python ≥ 3.11）
+2. 确认依赖可装：`uv pip install --python .venv/bin/python -r requirements.txt`（失败则给出系统级提示）
 3. 确认目录结构完整：`config/`、`data/`、`deck/`、`harness/` 存在（包根目录）
 4. 汇报检查结果 → 进入第 1 步
 
@@ -30,9 +30,9 @@ metadata:
 
 ### 第 2 步 · 行情数据源（问用户要：数据获取方式）
 - **问**：行情数据想怎么接入？
-  1. **Tushare**（需要 token，覆盖最全，推荐）→ 要 token（注意：部分接口需积分）
-  2. **AKShare**（免费开源，免 token，覆盖基础日线）→ 无需凭据
-  3. **演示数据**（包内合成样例，立即可用，用于跑通流程）→ 无需凭据
+  1. **Baostock + 腾讯 + 同花顺**（默认推荐，免 Tushare token）→ 股票清单/日线/指数、实时估值、财务质量
+  2. **演示数据**（包内合成样例，立即可用，用于跑通流程）→ 无需凭据
+  3. **旧 Tushare 脚本**（仅历史能力，不推荐；需 token 且部分接口需积分）
 - **做**：把选择写入 `config/params.yaml` 的数据源段；提示数据边界（免费接口的覆盖限制）
 
 ### 第 3 步 · 配置落盘（自动）
@@ -41,9 +41,9 @@ metadata:
 - 展示"已保存哪些配置、保存在哪"
 
 ### 第 4 步 · 拉取数据（执行，可后台）
-- 按所选数据源运行对应获取脚本（如 `data/fetcher_akshare.py` / `data/fetcher_tushare.py`）
+- 免费真实链路按《macOS 运行指南》分步执行：先 30 只样本，再全市场日线，最后财务与全链刷新
 - 演示模式：运行演示数据生成脚本
-- 过程中回报进度；失败则诊断（token 无效？网络？积分不足？）并**回到对应步骤重问**
+- 过程中回报进度；失败则诊断网络、覆盖率或权限边界，并**回到对应步骤重问**
 
 ### 第 5 步 · 全链验证（自动验收）
 跑通最小闭环并逐项回报：
@@ -78,4 +78,5 @@ metadata:
 - 配置模板：`config/*.example` → 复制为 `config/*` 后填写
 - 数据目录：`data/cache/`（gitignore 保护）；凭据：`harness/home/.credentials.yaml`
 - 看板：`deck/deck_server.py`（默认 8787）；启动器：根目录 `start.bat`（如有）
+- macOS 启动：`scripts/run_macos.sh`；免费真实数据入口：`data/free_daily_pipeline.py`
 - 部署报告：`logs/deploy_report.md`

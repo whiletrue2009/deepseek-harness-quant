@@ -31,8 +31,9 @@ if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
 from factors.opportunities.score import size_tier_of   # ★2026-08-11 市值档位统一口径（券商指数划分）
+from data.cache import CACHE_DIR
 
-BARS_DB = Path(r"data/cache/bars.db")
+BARS_DB = CACHE_DIR / "bars.db"
 TECH_TOP_N = 6                 # ★2026-08-14 Pitch 改进规格 v2 ③：科技线每日 Top ≤6（原 14——同质化+无实证支撑）
                                #   （跨家族去重 + 竞价反信号过滤 + 昨板今收风控；F4 体检：limup 族 20 日无持续优势）
 LIMUP_DAYS = 5                 # 情绪窗口（近 5 日）
@@ -52,7 +53,7 @@ def _board_pct(code: str) -> float:
 def load_recent(days: int = CONSEC_DAYS) -> pd.DataFrame:
     """拉 bars 最近 N 个交易日全市场（★#143 修复：真正双库合并——主库+最近 3 增量库，
     原实现注释写"合并"但代码只连主库 → 08-12 数据进增量库后短线池滞后一天）"""
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro", uri=True, timeout=10)
     try:
         dates = [r[0] for r in con.execute("SELECT DISTINCT date FROM daily_bar ORDER BY date DESC LIMIT ?", (days + 3,))]
         # ★#143 增量库日期并入（08-12 起增量写 bars_incr_*.db，主库写保护停更）
@@ -60,7 +61,7 @@ def load_recent(days: int = CONSEC_DAYS) -> pd.DataFrame:
             from pathlib import Path as _P
             for _p in sorted(_P(BARS_DB).parent.glob("bars_incr_*.db"))[-3:]:
                 try:
-                    _c = sqlite3.connect(f"file:{_p}?mode=ro&immutable=1", uri=True, timeout=3)
+                    _c = sqlite3.connect(f"file:{_p}?mode=ro", uri=True, timeout=10)
                     dates += [r[0] for r in _c.execute(
                         "SELECT DISTINCT date FROM daily_bar ORDER BY date DESC LIMIT ?", (days + 3,))]
                     _c.close()
@@ -76,7 +77,7 @@ def load_recent(days: int = CONSEC_DAYS) -> pd.DataFrame:
             from pathlib import Path as _P
             for _p in sorted(_P(BARS_DB).parent.glob("bars_incr_*.db"))[-3:]:
                 try:
-                    _c = sqlite3.connect(f"file:{_p}?mode=ro&immutable=1", uri=True, timeout=3)
+                    _c = sqlite3.connect(f"file:{_p}?mode=ro", uri=True, timeout=10)
                     _df2 = pd.read_sql_query(q, _c, params=dates)
                     if len(_df2):
                         df = pd.concat([df, _df2], ignore_index=True).drop_duplicates(
@@ -239,7 +240,7 @@ def build() -> Path:
     _MV = {}
     try:
         import sqlite3
-        con = sqlite3.connect(r"data/cache/finance.db", timeout=3)
+        con = sqlite3.connect(CACHE_DIR / "finance.db", timeout=10)
         for row in con.execute("SELECT code, total_mv FROM valuation WHERE trade_date=(SELECT MAX(trade_date) FROM valuation)"):
             if row[1]:
                 _MV[str(row[0])] = row[1] / 10000.0   # 万元→亿

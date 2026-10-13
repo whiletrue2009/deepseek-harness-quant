@@ -26,7 +26,9 @@ sys.path.insert(0, str(BASE))
 import pandas as pd
 import py7zr
 
-MINUTE_DB = r"data\cache\minute.db"
+from data.cache import CACHE_DIR
+
+MINUTE_DB = str(CACHE_DIR / "minute.db")
 LOG = BASE / "logs" / "ingest_minute_7z.log"
 
 

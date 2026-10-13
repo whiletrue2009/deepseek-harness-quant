@@ -82,7 +82,7 @@ def backtest_regime(score_df, closes, month_ends, idx, mv_map=None, min_mv_yi=0.
 
 def load_mv_map():
     mv = {}
-    p = Path(r"data/cache\circ_mv_map_full.csv")
+    p = Path(r"data/cache/circ_mv_map_full.csv")
     if p.exists():
         m = pd.read_csv(p, encoding="utf-8")
         col_code = "ts_code" if "ts_code" in m.columns else m.columns[0]

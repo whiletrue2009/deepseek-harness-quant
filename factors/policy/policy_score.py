@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-MACRO_DB = Path(r"data\cache\macro.db")
+MACRO_DB = BASE / "data" / "cache" / "macro.db"
 EPU_DB = BASE / "data" / "cache" / "policy" / "epu.db"
 
 WEIGHTS = {"epu": -0.35, "epu_chg3m": -0.20, "sf_yoy": 0.30, "spread": 0.15}
@@ -102,7 +102,7 @@ def backtest(panel: pd.DataFrame):
     """评分 → 次月收益检验（需市场收益，独立构造）"""
     import sqlite3 as sq
 
-    con = sq.connect(r"data/cache/bars.db")
+    con = sq.connect(str(BASE / "data" / "cache" / "bars.db"))
     bars = pd.read_sql(
         "SELECT date, code, close, is_st FROM daily_bar WHERE adjust='qfq' AND date>='2015-01-01' AND is_st=0",
         con,

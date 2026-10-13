@@ -24,7 +24,7 @@ import py7zr
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
-OUT_DIR = Path(r"data/minute/incr_parquet")
+OUT_DIR = BASE / "data/minute/incr_parquet"
 CN_COLS = {"日期": "trade_time", "时间": "trade_time", "开盘": "open", "最高": "high",
            "最低": "low", "收盘": "close", "成交量": "volume", "成交额": "amount"}
 
@@ -145,8 +145,8 @@ def main():
     args = ap.parse_args()
 
     # ★2026-08-10 自动发现最新更新目录（用户每日数据更新生成新目录）
-    _ROOT = Path(r"data/minute/download/【2】2026单年A股分钟日频-持续更新到年底")
-    _DEFAULT_DIR = Path(r"data/minute/download/【2】2026单年A股分钟日频-持续更新到年底/8.9日更新/2026(1)/每日数据")
+    _ROOT = BASE / "data/minute/download/【2】2026单年A股分钟日频-持续更新到年底"
+    _DEFAULT_DIR = _ROOT / "8.9日更新/2026(1)/每日数据"
     if _ROOT.exists():
         cands = []
         for p in _ROOT.glob("*日更新*"):

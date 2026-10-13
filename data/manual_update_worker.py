@@ -104,25 +104,26 @@ def run(ts: str):
                         [PY, str(BASE / "data" / "convert_7z_to_parquet.py")], timeout=3600)
         step("分钟 7z 增量 → parquet", s1)
 
-        # 2) 日线增量 ★2026-08-10 双通道：Tushare 优先（秒级）→ baostock 预检兜底（35s/1 只）
-        tushare_ok = False
-        net_ok = None   # ★#336 修复：net_ok 仅在 baostock 兜底分支赋值，Tushare 成功时未定义 → done 构造 UnboundLocalError → 误标 failed
+        # 2) 日线/指数/红绿灯增量：默认免 Tushare 管线，不触发旧 token 通道。
+        daily_ok = False
         try:
             r = subprocess.run(
-                [PY, "-X", "utf8", str(BASE / "data" / "incremental_daily_tushare.py")],
-                capture_output=True, text=True, timeout=300, encoding="utf-8", errors="replace")
-            tushare_ok = r.returncode == 0 and "已入库" in (r.stdout or "")
-            print(f"  日线增量(Tushare): {(r.stdout or '').strip().splitlines()[-1] if (r.stdout or '').strip() else '无输出'}")
+                [PY, "-X", "utf8", str(BASE / "data" / "free_daily_pipeline.py"),
+                 "--skip-quality", "--skip-refresh"],
+                capture_output=True, text=True, timeout=7200, encoding="utf-8", errors="replace")
+            daily_ok = r.returncode == 0
+            lines = (r.stdout or "").strip().splitlines()
+            print(f"  免 Tushare 日线增量: {lines[-1] if lines else '无输出'}")
         except subprocess.TimeoutExpired:
-            print("  ⚠ Tushare 日线增量超时")
+            print("  ⚠ 免 Tushare 日线增量超时")
         except Exception:
             pass
-        if tushare_ok:
-            summary.append("日线增量: Tushare 秒级完成")
+        net_ok = daily_ok
+        if daily_ok:
+            summary.append("日线增量: Baostock 免 token 完成")
         else:
-            # ★2026-08-14 移除 baostock 全市场兜底（1500s，卡整链几小时）→ 失败即跳过，次日/后续链重试
-            print("  ⚠ Tushare 日线增量失败（已重试）→ 跳过当日增量（数据保持 bars.db 现有；后续链自动重试）")
-            summary.append("日线增量: 跳过（Tushare 失败，不再走 baostock 全市场兜底）")
+            failed_steps.append("免 Tushare 日线增量")
+            summary.append("日线增量: 失败")
 
         # 3) 健康巡检（本地）
         def s3():

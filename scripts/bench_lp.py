@@ -5,7 +5,7 @@ sys.path.insert(0, '.')
 from data.cache import DailyCache
 import sqlite3
 
-con = sqlite3.connect(r'data/cache\stock_basic.db')
+con = sqlite3.connect(r'data/cache/stock_basic.db')
 codes = [r[0] for r in con.execute('SELECT code FROM stock_basic LIMIT 1500').fetchall()]
 con.close()
 

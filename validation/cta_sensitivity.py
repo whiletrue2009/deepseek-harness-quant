@@ -18,7 +18,7 @@ print("[sens] 加载面板 + HS300...", flush=True)
 panel = rp.load_panel()
 turn_low = -_f.factor_turnover(panel, window=40).reindex(panel.index)
 
-h = pd.read_parquet(r".\output\hs300_monthly.parquet")
+h = pd.read_parquet("output/hs300_monthly.parquet")
 hs_m = h["close"].copy() if "close" in h.columns else h.iloc[:, 0].copy()
 if not isinstance(hs_m.index, pd.DatetimeIndex):
     hs_m.index = pd.to_datetime(hs_m.index)
@@ -90,6 +90,6 @@ for top_n in (10, 20, 40):
 import json
 out = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "rows": rows,
        "note": "低频 CTA 择时参数敏感性；无择时对照 +15.96%/-8.8%/1.11（2019+ 因子池审计）"}
-with open(r".\output\cta_sensitivity.json", "w", encoding="utf-8") as f:
+with open("output/cta_sensitivity.json", "w", encoding="utf-8") as f:
     json.dump(out, f, ensure_ascii=False, indent=1)
 print(f"[sens] 完成 {time.time()-t0:.0f}s → output/cta_sensitivity.json", flush=True)

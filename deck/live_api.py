@@ -19,6 +19,19 @@ BASE = Path(__file__).resolve().parent.parent
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
+from data.cache import CACHE_DIR
+
+
+def _cache_uri(name: str) -> str:
+    """按统一缓存目录生成 SQLite 只读 URI，兼容绝对路径与空格。"""
+    return (CACHE_DIR / name).resolve().as_uri() + "?mode=ro&immutable=1"
+
+
+def _bar_dbs() -> list:
+    return [str(CACHE_DIR / "bars.db")] + [
+        str(p) for p in sorted(CACHE_DIR.glob("bars_incr_*.db"))[-3:]
+    ]
+
 _fwd_cache = {"ts": 0, "data": None}
 _cal_cache = {"ts": 0, "data": None}   # ★#150 日历缓存（数据源版本 5min）
 _alrt_cache = {"ts": 0, "data": None}  # ★#150 预警缓存（数据源版本 2min）
@@ -60,7 +73,7 @@ def _bars_version() -> float:
     """数据源版本 = bars.db + 增量库的最新 mtime（★0.01s；MAX(date) 全表扫 900 万行要 1s+）"""
     try:
         import glob as _g
-        fs = [r"data\cache\bars.db"] + _g.glob(r"data\cache\bars_incr_*.db")
+        fs = [str(CACHE_DIR / "bars.db")] + _g.glob(str(CACHE_DIR / "bars_incr_*.db"))
         mt = [os.path.getmtime(f) for f in fs if os.path.exists(f)]
         return max(mt) if mt else 0.0
     except Exception:
@@ -100,8 +113,7 @@ def live_forward(force: bool = False) -> dict:
         try:
             import sqlite3 as _sq2
             from pathlib import Path as _P3
-            for _p in (["data/cache/bars.db"] +
-                       [str(p) for p in sorted(_P3("data/cache").glob("bars_incr_*.db"))[-3:]]):
+            for _p in _bar_dbs():
                 try:
                     con = _sq2.connect(_P3(_p).as_uri() + "?mode=ro&immutable=1",
                                        uri=True, timeout=3)
@@ -424,7 +436,7 @@ def live_holdings() -> dict:
     #   stock_basic 匹配；名称缺失曾导致持仓显示为裸 code）
     try:
         import sqlite3 as _sq
-        _con = _sq.connect("file:data/cache/stock_basic.db?mode=ro&immutable=1", uri=True, timeout=3)
+        _con = _sq.connect(_cache_uri("stock_basic.db"), uri=True, timeout=3)
         for _p in pf.get("positions", []):
             _c = _p.get("code", "")
             if not _p.get("name") or _p["name"] == _c:
@@ -932,7 +944,7 @@ def live_funnel() -> dict:
     bars_rows = None
     try:
         import sqlite3 as _sq
-        _c = _sq.connect("file:data/cache/bars.db?mode=ro&immutable=1", uri=True, timeout=3)
+        _c = _sq.connect(_cache_uri("bars.db"), uri=True, timeout=3)
         bars_rows = _c.execute("SELECT COUNT(*) FROM daily_bar WHERE adjust='qfq' AND code != 'SH.000300'").fetchone()[0]
         _c.close()
     except Exception:
@@ -986,7 +998,8 @@ def live_funnel() -> dict:
         import glob as _gf
         _mf = sorted(_gf.glob(str(BASE / "logs" / "factor_manifest*.json")), key=_os.path.getmtime)
         if not _mf:
-            _mf = sorted(_gf.glob(r"data\factorpool\output\factor_manifest_*.json"),
+            _mf = sorted(_gf.glob(str(BASE / "data" / "factorpool" / "output" /
+                                      "factor_manifest_*.json")),
                          key=_os.path.getmtime)
         if _mf:
             _md = json.load(open(_mf[-1], encoding="utf-8"))
@@ -1024,7 +1037,8 @@ def live_turnlow_top(top_n: int = 20) -> dict:
     import glob as _g
     import os as _os
     import sqlite3 as _sq
-    fs = sorted(_g.glob(r"data\factorpool\output\daily_scores\daily_*.csv"),
+    fs = sorted(_g.glob(str(BASE / "data" / "factorpool" / "output" /
+                             "daily_scores" / "daily_*.csv")),
                 key=os.path.getmtime)
     if not fs:
         return {"ok": False, "error": "无 daily_scores 文件"}
@@ -1041,7 +1055,7 @@ def live_turnlow_top(top_n: int = 20) -> dict:
         # 名字映射
         names = {}
         try:
-            con = _sq.connect("file:data/cache/stock_basic.db?mode=ro&immutable=1", uri=True)
+            con = _sq.connect(_cache_uri("stock_basic.db"), uri=True)
             names = dict(con.execute("SELECT code, name FROM stock_basic").fetchall())
             con.close()
         except Exception:
@@ -1076,9 +1090,7 @@ def portfolio_perf() -> dict:
         # ★#69 双库合并（主库 + 最近 3 个增量库 immutable）
         def _dbs():
             import glob as _g
-            dbs = ["data/cache/bars.db"]
-            inc = sorted(_g.glob("data/cache/bars_incr_*.db"))[-3:]
-            return dbs + inc
+            return _bar_dbs()
         def _ro(p):
             return f"{_P(p).as_uri()}?mode=ro&immutable=1"
         def _fetch(code, ed, adjust="qfq"):
@@ -1394,8 +1406,7 @@ def live_calendar() -> dict:
         import glob as _g2
         from pathlib import Path as _P2
         _dayset = set()
-        _db_paths = ["data/cache/bars.db"] + [
-            str(p) for p in sorted(_P2("data/cache").glob("bars_incr_*.db"))[-3:]]
+        _db_paths = _bar_dbs()
         for _p in _db_paths:
             try:
                 con = sqlite3.connect(_P2(_p).as_uri() + "?mode=ro&immutable=1",
@@ -1766,8 +1777,7 @@ def _batch_review_payload(entries: list) -> dict:
             if _key in _mkt_median_cache:
                 return _mkt_median_cache[_key]
             try:
-                _c4 = _sq4.connect("file:data/cache/bars.db?mode=ro&immutable=1",
-                                   uri=True, timeout=3)
+                _c4 = _sq4.connect(_cache_uri("bars.db"), uri=True, timeout=3)
                 _a = dict(_c4.execute(
                     "SELECT code, close FROM daily_bar WHERE date=? AND adjust='qfq'", (d0,)).fetchall())
                 _b = dict(_c4.execute(
@@ -2175,12 +2185,12 @@ def live_factor_perf() -> dict:
     if _c and _t.time() - _c[0] < 300:
         return _c[1]
     out = {"ok": False, "err": "unified.db 未建成"}
-    db = Path(r"data/cache/unified.db")
+    db = CACHE_DIR / "unified.db"
     if not db.exists():
         return out
     try:
         import sqlite3 as _sq
-        con = _sq.connect(f"file:{db}?mode=ro&immutable=1", uri=True, timeout=3)
+        con = _sq.connect(_cache_uri("unified.db"), uri=True, timeout=3)
         aggs = [{"factor": r[0], "n_pitch": r[1], "n_done_t5": r[2],
                  "t1_avg": r[3], "t5_avg": r[4], "t5_win": r[5], "excess_avg": r[6]}
                 for r in con.execute(
@@ -2215,7 +2225,7 @@ def live_factor_ranking() -> dict:
         # 1. 读证据权重配置（evidence_weights 表）
         backtest_w, live_w, min_live, boost = 1.0, 0.4, 20.0, 1.2
         try:
-            con = _sq.connect("file:data/cache/unified.db?mode=ro&immutable=1", uri=True, timeout=3)
+            con = _sq.connect(_cache_uri("unified.db"), uri=True, timeout=3)
             for k, v in con.execute("SELECT key, value FROM evidence_weights").fetchall():
                 try:
                     if k == "backtest_w": backtest_w = float(v)
@@ -2304,7 +2314,7 @@ def live_db_view() -> dict:
     import sqlite3 as _sq
     out = {"ok": True, "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "tables": {}, "ranking": []}
     try:
-        con = _sq.connect("file:data/cache/unified.db?mode=ro&immutable=1", uri=True, timeout=3)
+        con = _sq.connect(_cache_uri("unified.db"), uri=True, timeout=3)
         for tbl, name in (("factor_agg", "因子实战聚合"), ("factor_pitch", "因子×Pitch 明细"),
                           ("factor_backtest", "因子全量回测（top20%→T+1）"),
                           ("evidence_weights", "证据权重配置"), ("market_daily", "市场日线快照")):
@@ -2473,7 +2483,7 @@ def live_strong_hits() -> dict:
         from factors.opportunities.scan import load_strong_hits
         hits = load_strong_hits()
         import sqlite3 as _sq
-        con = _sq.connect("file:data/cache/stock_basic.db?mode=ro&immutable=1", uri=True)
+        con = _sq.connect(_cache_uri("stock_basic.db"), uri=True)
         meta = {r[0]: (r[1], r[2] or "") for r in con.execute(
             "SELECT code, name, industry FROM stock_basic").fetchall()}
         con.close()
@@ -2533,7 +2543,7 @@ def live_auction() -> dict:
         d8 = sorted(sig.keys())[-1]
         day = sig[d8]
         import sqlite3 as _sq
-        con = _sq.connect("file:data/cache/stock_basic.db?mode=ro&immutable=1", uri=True)
+        con = _sq.connect(_cache_uri("stock_basic.db"), uri=True)
         meta = {r[0]: (r[1], r[2] or "") for r in con.execute(
             "SELECT code, name, industry FROM stock_basic").fetchall()}
         con.close()
@@ -3068,8 +3078,7 @@ def live_data_assets() -> dict:
            "tables": [], "inventory": [], "lineage": []}
     try:
         import sqlite3 as _sq
-        _con = _sq.connect("file:data/cache/unified.db?mode=ro&immutable=1",
-                           uri=True, timeout=3)
+        _con = _sq.connect(_cache_uri("unified.db"), uri=True, timeout=3)
         _cur = _con.cursor()
         for (t,) in _cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
             try:
@@ -3091,88 +3100,131 @@ def live_data_assets() -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════
-# ★2026-08-14 盘中实时行情（用户需求：数据实时更新）
-#   新浪全市场实时快照（akshare stock_zh_a_spot，5542 只，~12s）→ 市场实时指标
-#   60s 缓存（盘中频繁请求不重复拉；非交易时段自动降级返回最近快照）
+# ★免 Tushare 实时行情：腾讯批量快照 + stock_basic 动态股票池。
+#   60s 缓存；用腾讯源时间戳区分交易日、盘前、午休、盘后与陈旧快照。
 # ══════════════════════════════════════════════════════════════════
 _rt_cache = {"ts": 0.0, "data": None, "err": None}
 
 
+def _configured_realtime_source() -> str:
+    try:
+        import yaml
+        cfg = yaml.safe_load((BASE / "config" / "params.yaml").read_text(encoding="utf-8")) or {}
+        return str((((cfg.get("data") or {}).get("sources")) or {}).get("realtime_primary") or "tencent")
+    except Exception:
+        return "tencent"
+
+
+def _realtime_market_state(source_time: str | None) -> tuple[bool, str]:
+    from zoneinfo import ZoneInfo
+
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    clock = now.time()
+    if now.weekday() >= 5:
+        return False, "weekend"
+    if clock < datetime.strptime("09:30", "%H:%M").time():
+        return False, "pre_open"
+    if clock > datetime.strptime("11:30", "%H:%M").time() and clock < datetime.strptime("13:00", "%H:%M").time():
+        return False, "lunch_break"
+    if clock >= datetime.strptime("15:00", "%H:%M").time():
+        return False, "after_close"
+
+    # 交易日白名单由源时间兜底：法定节假日仍会返回上一交易日快照。
+    if source_time:
+        try:
+            snap = datetime.strptime(source_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=now.tzinfo)
+            if snap.date() != now.date():
+                return False, "non_trading_day"
+            if (now - snap).total_seconds() > 180:
+                return False, "stale_source"
+        except ValueError:
+            return False, "unknown_source_time"
+    return True, "trading"
+
+
+def _realtime_universe() -> list[str]:
+    import sqlite3 as _sq
+
+    con = _sq.connect(_cache_uri("stock_basic.db"), uri=True, timeout=3)
+    try:
+        return [r[0] for r in con.execute(
+            "SELECT code FROM stock_basic WHERE status='1' ORDER BY code"
+        ).fetchall()]
+    finally:
+        con.close()
+
+
 def live_realtime() -> dict:
     """盘中实时行情快照：涨跌家数/涨停数/成交额/涨跌幅分布/领涨领跌。
-    数据源：新浪实时快照（akshare stock_zh_a_spot，60s 缓存）。
-    非交易时段（周末/盘前/盘后）返回最近一次快照 + market_open=False。"""
+    数据源：config/params.yaml 的 realtime_primary（当前实现为腾讯）。
+    非交易时段（周末/盘前/午休/盘后）返回快照 + market_open=False。"""
     global _rt_cache
     import time as _t
     now = _t.time()
     # 60s 缓存命中
     if _rt_cache["data"] is not None and now - _rt_cache["ts"] < 60:
         return _rt_cache["data"]
-    out = {"ok": True, "market_open": True,
+    source = _configured_realtime_source()
+    out = {"ok": True, "market_open": False,
            "ts": datetime.now().strftime("%H:%M:%S"),
-           "source": "sina_realtime"}
+           "source": f"{source}_realtime"}
     try:
-        import socket as _sk
-        _sk.setdefaulttimeout(20)
-        import akshare as _ak
-        import pandas as _pd
-        df = _ak.stock_zh_a_spot()   # 新浪全市场实时（5542 只）
+        if source != "tencent":
+            raise ValueError(f"未支持的 realtime_primary: {source}")
+        from data.fetcher_free import fetch_tencent_quotes
+        df = fetch_tencent_quotes(_realtime_universe())
         if df is None or df.empty:
             raise ValueError("空快照")
-        # 列名兼容（新浪：最新价/涨跌幅/成交额/成交量 等）
-        cols = {c: c for c in df.columns}
-        for a, b in [("最新价", "最新价"), ("涨跌幅", "涨跌幅"), ("成交额", "成交额"),
-                     ("成交量", "成交量"), ("名称", "名称"), ("代码", "代码"),
-                     ("昨收", "昨收"), ("最高", "最高"), ("最低", "最低")]:
-            if b in df.columns:
-                cols[b] = b
-        price = _pd.to_numeric(df.get("最新价"), errors="coerce")
-        chg = _pd.to_numeric(df.get("涨跌幅"), errors="coerce")
-        amt = _pd.to_numeric(df.get("成交额"), errors="coerce")
+        import pandas as _pd
+
+        price = _pd.to_numeric(df.get("price"), errors="coerce")
+        chg = _pd.to_numeric(df.get("pct_chg"), errors="coerce")
+        amt = _pd.to_numeric(df.get("amount_yi"), errors="coerce")
+        limit_up_price = _pd.to_numeric(df.get("limit_up"), errors="coerce")
+        limit_down_price = _pd.to_numeric(df.get("limit_down"), errors="coerce")
+        stale = df.get("is_stale", _pd.Series(False, index=df.index)).fillna(False).astype(bool)
         up = int((chg > 0).sum())
         down = int((chg < 0).sum())
         flat = int((chg == 0).sum())
-        limit_up = int((chg >= 9.8).sum())     # 近涨停（含 10%/20% 板块近似）
-        limit_down = int((chg <= -9.8).sum())
+        limit_up = int(
+            ((price > 0) & (limit_up_price > 0) & (price >= limit_up_price - 0.001) & ~stale).sum()
+        )
+        limit_down = int(
+            ((price > 0) & (limit_down_price > 0) & (price <= limit_down_price + 0.001) & ~stale).sum()
+        )
         med = float(chg.median()) if chg.notna().any() else 0.0
         total_amt = float(amt.sum()) if amt.notna().any() else 0.0
+        source_times = [str(x) for x in df.get("source_time", _pd.Series(dtype="object")).dropna().tolist()]
+        snap = max(source_times) if source_times else ""
         # 领涨/领跌（按涨跌幅排序取 5）
-        idx = chg.dropna().nlargest(5).index
-        gainers = [{"code": df.loc[i, "代码"], "name": df.loc[i, "名称"],
-                    "pct": float(chg.loc[i])} for i in idx if str(df.loc[i, "代码"]) != "nan"]
-        idx2 = chg.dropna().nsmallest(5).index
-        losers = [{"code": df.loc[i, "代码"], "name": df.loc[i, "名称"],
-                   "pct": float(chg.loc[i])} for i in idx2 if str(df.loc[i, "代码"]) != "nan"]
-        _snap = ""
-        for _c in ("时间", "时间戳", "更新时间"):
-            if _c in df.columns and not df[_c].isna().all():
-                _snap = str(df[_c].iloc[0])
-                break
-        # ★2026-08-14 持仓页实时收益：全市场现价映射 {code: {price, pct}}（新浪 code 如 sz300684 → 统一 300684.SZ）
+        tradable = (price > 0) & chg.notna() & ~stale
+        idx = chg[tradable].nlargest(5).index
+        gainers = [{"code": df.loc[i, "code"], "name": df.loc[i, "name"],
+                    "pct": round(float(chg.loc[i]), 2)} for i in idx]
+        idx2 = chg[tradable].nsmallest(5).index
+        losers = [{"code": df.loc[i, "code"], "name": df.loc[i, "name"],
+                   "pct": round(float(chg.loc[i]), 2)} for i in idx2]
+        # ★持仓页实时收益：标准代码映射 {600519.SH: {price, pct}}。
         _quotes = {}
-        try:
-            _codes = df.get("代码")
-            for _i in range(len(df)):
-                _c = str(_codes.iloc[_i]).strip().lower()
-                if not _c or _c == "nan":
-                    continue
-                _std = _c[2:] + "." + _c[:2].upper()
-                _pr = price.iloc[_i]
-                _pc = chg.iloc[_i]
-                if _pr is not None and not _pd.isna(_pr):
-                    _quotes[_std] = {"price": round(float(_pr), 3),
-                                     "pct": round(float(_pc), 2) if (_pc is not None and not _pd.isna(_pc)) else None}
-        except Exception:
-            pass
+        for i in range(len(df)):
+            if price.iloc[i] is not None and not _pd.isna(price.iloc[i]):
+                _quotes[str(df.loc[i, "code"])] = {
+                    "price": round(float(price.iloc[i]), 3),
+                    "pct": round(float(chg.iloc[i]), 2)
+                    if chg.iloc[i] is not None and not _pd.isna(chg.iloc[i]) else None,
+                }
+        market_open, session = _realtime_market_state(snap)
         out.update({
-            "n_stocks": int(len(df)),
+            "n_stocks": int(price.notna().sum()),
             "up": up, "down": down, "flat": flat,
             "limit_up": limit_up, "limit_down": limit_down,
             "median_chg": round(med, 2),
-            "total_amount_yi": round(total_amt / 1e8, 0) if total_amt else 0,
+            "total_amount_yi": round(total_amt, 0) if total_amt else 0,
             "gainers": gainers[:5], "losers": losers[:5],
-            "snap_time": _snap,
-            "quotes": _quotes,   # ★2026-08-14 持仓页实时价映射（60s 缓存内 0 成本复用）
+            "snap_time": snap,
+            "market_open": market_open,
+            "session": session,
+            "quotes": _quotes,
         })
         _rt_cache.update({"ts": now, "data": out, "err": None})
     except Exception as e:
@@ -3244,7 +3296,7 @@ def live_endpoints() -> dict:
         except Exception:
             pass
     try:
-        live_realtime()   # 新浪快照拉取（60s 缓存命中后 <1ms）
+        live_realtime()   # 实时快照预热（60s 缓存命中后 <1ms）
     except Exception:
         pass
     out = {"ok": True, "ts": datetime.now().strftime("%H:%M:%S"),

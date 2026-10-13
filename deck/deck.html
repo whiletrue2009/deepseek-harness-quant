@@ -181,7 +181,7 @@ async function init(){
     POOL = await fetchJSON(API.pool);
   }catch(e){
     $('#hint').style.display = 'block';
-    $('#hint').innerHTML = '⚠️ 无法读取数据 —— 请通过本地服务器打开：<code>cd deepseek-harness-quant && ./.venv/Scripts/python.exe deck/deck_server.py</code>，然后访问 <b>http://127.0.0.1:8787/deck.html</b>（浏览器直接打开文件时无法读取本地 JSON）';
+  $('#hint').innerHTML = '⚠️ 无法读取数据 —— 请通过本地服务器打开：<code>cd deepseek-harness-quant && ./.venv/bin/python deck/deck_server.py</code>，然后访问 <b>http://127.0.0.1:8787/deck.html</b>（浏览器直接打开文件时无法读取本地 JSON）';
     return;
   }
   try{ DECISIONS = await fetchJSON(API.decisions); }catch(e){ DECISIONS = []; }

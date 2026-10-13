@@ -18,7 +18,7 @@ print("[cta] 加载面板 + HS300...", flush=True)
 panel = rp.load_panel()
 turn_low = -_f.factor_turnover(panel, window=40).reindex(panel.index)   # ★40日 与核查基线对齐
 
-h = pd.read_parquet(r".\output\hs300_monthly.parquet")
+h = pd.read_parquet("output/hs300_monthly.parquet")
 hs_m = h["close"].copy() if "close" in h.columns else h.iloc[:, 0].copy()
 if not isinstance(hs_m.index, pd.DatetimeIndex):
     hs_m.index = pd.to_datetime(hs_m.index)

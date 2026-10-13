@@ -21,6 +21,7 @@ import sqlite3
 import ssl
 import sys
 import urllib.request
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -48,7 +49,15 @@ def _ctx():
 
 def _download(url: str, timeout=30) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    return urllib.request.urlopen(req, timeout=timeout, context=_ctx()).read()
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout, context=_ctx()).read()
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(1 + attempt)
+    raise last_error
 
 
 def init_db() -> sqlite3.Connection:
@@ -115,7 +124,20 @@ def load_hl() -> dict:
 
 def sync(con: sqlite3.Connection) -> int:
     """FRED 全量 upsert（921 行很小，直接全量）+ H&L 补列"""
-    fred = load_fred()
+    try:
+        fred = load_fred()
+    except Exception as exc:
+        cached = con.execute(
+            "SELECT COUNT(*), MAX(month) FROM epu_monthly WHERE epu IS NOT NULL"
+        ).fetchone()
+        if cached and cached[0]:
+            print(
+                f"EPU 在线刷新失败，保留本地缓存：{cached[0]} 条，最新 {cached[1]}；"
+                f"原因: {exc}",
+                file=sys.stderr,
+            )
+            return 0
+        raise
     hl = load_hl()
     cur = con.cursor()
     n = 0

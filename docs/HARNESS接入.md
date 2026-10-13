@@ -22,7 +22,7 @@ QuantDeck（本项目）
 
 ## 二、第一步：接入 DeepSeek API Key（关键）
 
-> **核心思路：先接 AI 的 API（DeepSeek），AI 就能帮你接入剩下的 API（Tushare 等）。**
+> **核心思路：先接 AI 的 API（DeepSeek），AI 就能帮你按当前免费链路检查环境、拉取数据并做全链验证。**
 
 1. 注册 DeepSeek 开放平台并创建 API Key：https://platform.deepseek.com/api_keys
 2. 复制模板为正式凭据文件：
@@ -36,16 +36,22 @@ QuantDeck（本项目）
 4. 启动（launcher 或 `python deck/deck_server.py` + `node harness/node_modules/@deepseek-ai/dsh/lib/bin.js web`）
 5. 打开 http://127.0.0.1:3080（HARNESS GUI）或量化控制页（:8787/control）——即可与 AI 对话
 
-## 三、让 AI 帮你接入其余 API
+## 三、让 AI 帮你跑通免费真实数据
 
-接入 DeepSeek API Key 后，直接在对话中要求，例如：
+接入 DeepSeek API Key 后，可以直接让 AI 检查和执行默认免费链路。推荐说法：
 
-> 「请帮我完成 Tushare 数据源接入：把 config/params.yaml 中 data.tushare_token 的配置流程走一遍，并告诉我需要在哪里注册、token 填哪里。」
+> 「按 macOS 运行指南检查环境，先跑 30 只样本，再分步初始化全市场免费真实数据，并汇报每个数据库覆盖率和失败清单。」
 
-AI 会指导/协助你完成：
-- **Tushare token**（行情/财报数据，https://tushare.pro 注册）
-- 其他可选数据源（akshare 免费接口无需 token）
-- 系统参数调优、skill 填充等
+默认链路不需要 Tushare token：
+
+| 数据 | 来源 |
+|---|---|
+| 股票清单、日线、指数 | Baostock |
+| 实时快照、PE/PB/市值 | 腾讯 |
+| 财务质量 | 同花顺 |
+| 历史流通市值 | 本地 `amount / turn` 反推 |
+
+旧 Tushare 脚本仅保留为历史能力，不属于默认主管线。若对话建议填写 Tushare token，应先确认你显式选择了旧链路。
 
 ## 四、预置空白 Skill（打开即自带）
 

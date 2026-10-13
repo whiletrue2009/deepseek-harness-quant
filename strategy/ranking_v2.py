@@ -33,10 +33,12 @@ sys.path.insert(0, str(BASE))
 import numpy as np
 import pandas as pd
 
-BARS_DB = Path(r"D:/劳威派量化数据/cache/bars.db")
-FIN_DB = Path(r"D:/劳威派量化数据/cache/finance.db")
-BASIC_DB = Path(r"D:/劳威派量化数据/cache/stock_basic.db")
-MV_CSV = Path(r"D:/劳威派量化数据/cache/circ_mv_map_full.csv")
+from data.cache import CACHE_DIR
+
+BARS_DB = CACHE_DIR / "bars.db"
+FIN_DB = CACHE_DIR / "finance.db"
+BASIC_DB = CACHE_DIR / "stock_basic.db"
+MV_CSV = CACHE_DIR / "circ_mv_map_full.csv"
 
 
 def load_close_panel(days=300, end=None) -> pd.DataFrame:

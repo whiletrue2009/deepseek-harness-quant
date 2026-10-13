@@ -17,7 +17,9 @@ for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy",
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
-DB = Path(r"data/cache/stock_basic.db")
+from data.cache import cache_path
+
+DB = cache_path("stock_basic.db")
 
 
 def main():
@@ -52,6 +54,7 @@ def main():
             print("industry fetch warn:", e)
 
         # 3) 入库
+        DB.parent.mkdir(parents=True, exist_ok=True)
         con = sqlite3.connect(str(DB))
         con.execute("""CREATE TABLE IF NOT EXISTS stock_basic (
             code TEXT PRIMARY KEY, name TEXT, industry TEXT,

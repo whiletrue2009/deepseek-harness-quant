@@ -85,13 +85,16 @@ def run_step(name, cmd, timeout=3600):
 def health_check():
     """数据健康巡检：重复行/最新日期/覆盖率"""
     import sqlite3
-    con = sqlite3.connect("file:data/cache/bars.db?mode=ro&immutable=1", uri=True, timeout=3)
+    from data.cache import CACHE_DIR
+
+    bars_db = CACHE_DIR / "bars.db"
+    con = sqlite3.connect(f"file:{bars_db.as_posix()}?mode=ro", uri=True, timeout=10)
     dup = con.execute("SELECT COUNT(*) FROM (SELECT code,date,adjust,COUNT(*) c FROM daily_bar GROUP BY code,date,adjust HAVING c>1)").fetchone()[0]
     # ★#143 双库合并探测最新日（08-12 起增量写 bars_incr_*.db，单库会误报旧日）
     latest = con.execute("SELECT MAX(date) FROM daily_bar WHERE adjust='qfq'").fetchone()[0]
     try:
         from pathlib import Path as _P
-        for _p in sorted(_P("data/cache").glob("bars_incr_*.db"))[-3:]:
+        for _p in sorted(CACHE_DIR.glob("bars_incr_*.db"))[-3:]:
             try:
                 _c = sqlite3.connect(f"file:{_p}?mode=ro&immutable=1", uri=True, timeout=3)
                 _m = _c.execute("SELECT MAX(date) FROM daily_bar WHERE adjust='qfq'").fetchone()[0]
@@ -141,26 +144,22 @@ def main():
     # 1) 分钟 7z 增量 → parquet（★2026-08-09 切换：minute.db 被系统锁 → 走 parquet 绕行方案，
     #    convert_7z_to_parquet.py 输出到 incr_parquet/，minute_reader fallback 读取；旧 ingest_minute_7z 保留待锁释放）
     run_step("分钟 7z 增量 → parquet", [PY, str(BASE / "data" / "convert_7z_to_parquet.py")], timeout=7200)
-    # 2) 日线增量 ★2026-08-10 双通道：Tushare 主服务器优先（按日全市场 0.8s，quantdata888 实测可用），
-    #    baostock 半挂起（单只 40s）降级为兜底；Tushare 盘后数据未出（17:00 前）时自动跳过不卡链
+    # 2) 日线增量：Baostock 免 token 通道。默认链不读取 Tushare 配置，也不调用旧 token 脚本。
     try:
-        # ★2026-08-14 超时 120→300s：incremental_daily_tushare 含 trade_cal+daily+adj_factor×2+daily_basic
-        #   多次全市场调用 + 代理服务器 间歇超时重试，120s 常超 → 误走 baostock 慢兜底（几小时）
+        # 逐股增量写入本地缓存；中断后按失败清单续传。
         _rt = subprocess.run(
-            [PY, "-X", "utf8", str(BASE / "data" / "incremental_daily_tushare.py")],
-            capture_output=True, text=True, timeout=300, encoding="utf-8", errors="replace")
-        _tushare_ok = _rt.returncode == 0 and ("已入库" in (_rt.stdout or ""))
-        log(f"日线增量(Tushare): {(_rt.stdout or '').strip().splitlines()[-1] if (_rt.stdout or '').strip() else '无输出'}")
+            [PY, "-X", "utf8", str(BASE / "data" / "free_daily_loader.py"),
+             "--incremental", "--source", "baostock", "--rate", "0.04"],
+            capture_output=True, text=True, timeout=7200, encoding="utf-8", errors="replace")
+        _daily_ok = _rt.returncode == 0
+        log(f"日线增量(Baostock): {(_rt.stdout or '').strip().splitlines()[-1] if (_rt.stdout or '').strip() else '无输出'}")
     except subprocess.TimeoutExpired:
-        _tushare_ok = False
-        log("  ⚠ Tushare 日线增量超时")
+        _daily_ok = False
+        log("  ⚠ Baostock 日线增量超时")
     except Exception:
-        _tushare_ok = False
-    if not _tushare_ok:
-        # ★2026-08-14 移除 baostock 全市场兜底（原 timeout=7200 几小时，Tushare 偶发失败就卡住整链）
-        #   → 失败即跳过，数据保持 bars.db 现有；17:30 TushareInc / 次日链会自动重试。
-        #   baostock 仍用于历史补拉（backfill_hist_bars.py 独立任务），不在此处做每日兜底。
-        log("  ⚠ Tushare 日线增量失败（已重试）→ 跳过当日增量（数据保持 bars.db 现有；17:30/次日链自动重试）")
+        _daily_ok = False
+    if not _daily_ok:
+        log("  ⚠ Baostock 日线增量失败（失败清单已落盘，下一轮续传）")
     # 2.5) ★2026-08-14 沪深300 指数刷新（baostock 单指数，秒级）——保证红绿灯数据实时性（收盘后拿到当日指数）
     run_step("沪深300指数刷新", [PY, "-X", "utf8", str(BASE / "data" / "fetch_index_daily.py")], timeout=120)
     # 2.6) ★2026-08-14 择时红绿灯（均线金叉6/12，依赖 bars.db 沪深300 日线，纯本地毫秒级）

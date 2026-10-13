@@ -9,7 +9,7 @@
 
 说明：本脚本生成 30 只合成股票 × 250 个交易日的随机 OHLCV（带随机游走趋势），
 写入 data/demo/demo_bars.db（schema 与真实 bars.db 一致）+ demo_stock_basic.csv。
-真实行情请用 data/fetch_data.py 按 Tushare 协议自行获取（不可再分发）。
+真实行情请按 docs/数据说明.md 选择数据源自行获取（不可再分发）。
 """
 import os
 import random
@@ -47,7 +47,7 @@ def main():
         code = f"{600000 + i * 17:06d}"
         codes.append((code + ".SH", f"演示股{i:02d}") if i % 2 else (f"{300000 + i * 13:06d}.SZ", f"演示股{i:02d}"))
 
-    db_path = DEMO_DIR / "demo_bars.db"
+    db_path = DEMO_DIR / "bars.db"
     if db_path.exists():
         db_path.unlink()
     con = sqlite3.connect(str(db_path))

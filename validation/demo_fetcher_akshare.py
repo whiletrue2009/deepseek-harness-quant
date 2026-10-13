@@ -7,7 +7,7 @@
 3. 东财业绩预告 stock_yjyg_em 跑通
 4. 东财机构调研 stock_jgdy_tj_em 跑通
 
-运行：cd deepseek-harness-quant && .venv/Scripts/python.exe validation/demo_fetcher_akshare.py
+运行：cd deepseek-harness-quant && .venv/bin/python validation/demo_fetcher_akshare.py
 """
 import sys
 import time

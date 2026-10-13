@@ -13,6 +13,8 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 PY = sys.executable
 
+from data.cache import CACHE_DIR
+
 
 def log(msg):
     line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
@@ -25,7 +27,7 @@ def minute_writable() -> bool:
     """探测 minute.db 是否可写"""
     try:
         import sqlite3
-        con = sqlite3.connect(r"data\cache\minute.db", timeout=8)
+        con = sqlite3.connect(str(CACHE_DIR / "minute.db"), timeout=8)
         con.execute("CREATE TABLE IF NOT EXISTS _rw_probe (x INT)")
         con.execute("DROP TABLE IF EXISTS _rw_probe")
         con.commit()

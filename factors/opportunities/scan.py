@@ -45,12 +45,14 @@ from factors.opportunities.score import (opportunity_score, gains_score, prob_sc
                                          size_tier_of, strong_strength, classify_pitch_sub,
                                          EXPRESS_MIN_FAMILY, CONSENSUS_MIN_FAMILY,
                                          EXPRESS_PER_LINE, CONSENSUS_PER_LINE)
+from data.cache import CACHE_DIR
 
-BARS_DB = r"data\cache\bars.db"
-FIN_DB = r"data\cache\finance.db"
-QD_DB = r"data\cache\finance_quality.db"
-BASIC_DB = r"data\cache\stock_basic.db"
+BARS_DB = str(CACHE_DIR / "bars.db")
+FIN_DB = str(CACHE_DIR / "finance.db")
+QD_DB = str(CACHE_DIR / "finance_quality.db")
+BASIC_DB = str(CACHE_DIR / "stock_basic.db")
 OUT = BASE / "logs" / f"opp_pool_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"   # 每次运行唯一文件名（安全层限制同名文件只能写一次）
+TODAY = datetime.now().strftime("%Y-%m-%d")
 # 兼容读取：pitch_v2.py 用 get_latest_pool() 取最新
 
 
@@ -77,15 +79,13 @@ def batch_check_one(code: str) -> dict:
             from risk.stock_risk import _check_row
             import sqlite3
             con = sqlite3.connect(QD_DB)
-            period = con.execute(
-                "SELECT period, COUNT(*) c FROM quality WHERE period < '2026-07-01' "
-                "GROUP BY period ORDER BY period DESC LIMIT 1").fetchone()
-            # 取最新且覆盖≥1000 的期
+            expected = _expected_universe_count()
+            min_cov = min(expected, max(20, int(expected * 0.2)))
             rows = con.execute(
                 "SELECT code, roe_avg, gp_margin, current_ratio, liability_to_asset, cfo_to_np "
                 "FROM quality WHERE period=(SELECT MAX(period) FROM quality "
-                "WHERE period<'2026-07-01' AND (SELECT COUNT(*) FROM quality q2 "
-                "WHERE q2.period=quality.period)>=1000)").fetchall()
+                "WHERE period<? AND (SELECT COUNT(*) FROM quality q2 "
+                "WHERE q2.period=quality.period)>=?)", (TODAY, min_cov)).fetchall()
             con.close()
             for code_r, roe, gp, cr, liab, cfo in rows:
                 _risk_cache[code_r] = _check_row(code_r, None, roe, gp, cr, liab, cfo)
@@ -97,36 +97,44 @@ def batch_check_one(code: str) -> dict:
                                   "period": None})
 
 
-def _load_data_cfg():
-    import yaml
-    return yaml.safe_load((BASE / "config" / "params.yaml").read_text(encoding="utf-8"))["data"]
-
-
 def load_valuation(date: str = None) -> dict:
-    """估值数据（备用服务器 daily-basic，全市场 5535 只）→ {code: {pe, pb, dv_ratio, total_mv}}
-    列序（实测）：ts_code, trade_date, pe, pe_ttm, pb, ps, ps_ttm, dv_ratio, dv_ttm, total_mv, circ_mv
-    失败返回 {}（扫描器降级为价格分位近似）
+    """读取本地腾讯估值快照。
+
+    快照由 data/fetch_valuation_tencent.py 写入 finance.db；本函数不发起
+    网络请求，也不读取 Tushare 配置。缺失时返回空，由扫描器降级。
     """
-    import requests
+    import sqlite3
     try:
-        cfg = _load_data_cfg()
-        base = cfg["tushare_backup"]["url"].rstrip("/")
-        key = cfg["tushare_backup"]["api_key"]
-        r = requests.get(f"{base}/daily-basic", headers={"X-API-Key": key},
-                         params={"trade_date": (date or "").replace("-", ""),
-                                 "fields": "ts_code,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_mv,circ_mv"},
-                         timeout=30)
-        d = r.json()
-        if d.get("code") != 0:
+        path = CACHE_DIR / "finance.db"
+        if not path.exists():
             return {}
-        items = d["data"].get("items", [])
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+        try:
+            has = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='valuation'"
+            ).fetchone()
+            if not has:
+                return {}
+            if date:
+                day = str(date).replace("-", "")
+                rows = con.execute(
+                    "SELECT code,pe,pe_ttm,pb,total_mv,circ_mv FROM valuation WHERE replace(trade_date,'-','')=?",
+                    (day,),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    """
+                    SELECT code,pe,pe_ttm,pb,total_mv,circ_mv FROM valuation
+                    WHERE trade_date=(SELECT MAX(trade_date) FROM valuation)
+                    """
+                ).fetchall()
+        finally:
+            con.close()
         out = {}
-        for it in items:
-            vals = (list(it) + [None] * 10)[:10]
-            code, pe, pe_ttm, pb, ps, ps_ttm, dv, dv_ttm, tmv, cmv = vals
+        for code, pe, pe_ttm, pb, tmv, cmv in rows:
             out[code] = {
                 "pe": _f(pe), "pe_ttm": _f(pe_ttm), "pb": _f(pb),
-                "dv_ratio": _f(dv), "dv_ttm": _f(dv_ttm),
+                "dv_ratio": None, "dv_ttm": None,
                 "total_mv": _f(tmv), "circ_mv": _f(cmv),
             }
         return out
@@ -150,14 +158,13 @@ def load_panel(end: str = None, days: int = 300):
     rows = []
     from data.cache import CACHE_DIR as _CD
     from pathlib import Path as _P
-    # ★2026-08-11 #65 修复：只读最近 3 个增量库 + immutable（原遍历全部 64 个 + 普通连接，
-    #   每库等锁 5-20s → load_panel 10min+ 无输出）。增量语义：最新库已含全部增量，3 个兜底足够。
+    # 只读最近 3 个增量库并合并（历史环境曾产生 64 个增量库，全遍历过慢）。
     inc_files = sorted(_CD.glob("bars_incr_*.db"))[-3:]
     dbs = [BARS_DB] + [str(p) for p in inc_files]
     for db in dbs:
         try:
-            uri = f"{_P(db).as_uri()}?mode=ro&immutable=1"   # immutable 免等锁（0.01s vs 20s）
-            con = sqlite3.connect(uri, uri=True, timeout=3)
+            uri = f"{_P(db).as_uri()}?mode=ro"
+            con = sqlite3.connect(uri, uri=True, timeout=10)
             r2 = con.execute(
                 "SELECT code, date, close, volume FROM daily_bar WHERE adjust='qfq' "
                 "AND code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%' AND date >= '2020-01-01'",
@@ -180,13 +187,33 @@ def load_panel(end: str = None, days: int = 300):
 
 def load_fundamentals(end: str = None) -> pd.DataFrame:
     """最新一期财报（code6 索引）：roe, sq_nyoy, sq_rev_yoy, gross_margin, sq_net_profit
-    ★取"最近且覆盖≥4000 只"的期（MAX(period) 可能只有 129 只——最新财报未披露完；
+    ★取"最近且覆盖率达标"的期（MAX(period) 可能只有 129 只——最新财报未披露完；
       ORDER BY COUNT(*) DESC 会取到 2022 年报 5399 只（太老）→ 按 period 倒序 + 覆盖阈值，2026-08-09 修复）
     """
+    expected = _expected_universe_count()
+    min_cov = min(expected, max(30, int(expected * 0.8)))
     con = sqlite3.connect(FIN_DB)
     period = con.execute(
-        "SELECT period FROM finance_report WHERE period < '2026-07-01' "
-        "GROUP BY period HAVING COUNT(*) >= 4000 ORDER BY period DESC LIMIT 1").fetchone()[0]
+        "SELECT period FROM finance_report WHERE period < ? "
+        "GROUP BY period HAVING COUNT(*) >= ? ORDER BY period DESC LIMIT 1",
+        (TODAY, min_cov)).fetchone()
+    if period is None:
+        con.close()
+        quality = load_quality()
+        if quality is not None and not quality.empty:
+            quality["sq_nyoy"] = np.nan
+            quality["sq_net_yoy"] = np.nan
+            quality["sq_rev_yoy"] = np.nan
+            quality["sq_net_profit"] = np.nan
+            quality["gross_margin"] = quality["gp_margin"]
+            quality["roe"] = quality["roe_avg"]
+            return quality.set_index("code6")[
+                ["roe", "sq_net_yoy", "sq_nyoy", "sq_rev_yoy", "gross_margin", "sq_net_profit"]
+            ]
+        return pd.DataFrame(
+            columns=["roe", "sq_net_yoy", "sq_nyoy", "sq_rev_yoy", "gross_margin", "sq_net_profit", "code6"]
+        ).set_index("code6")
+    period = period[0]
     rows = con.execute(
         "SELECT code, period, net_profit, sq_net_yoy, sq_rev_yoy, roe FROM finance_report WHERE period=?",
         (period,)).fetchall()
@@ -198,16 +225,29 @@ def load_fundamentals(end: str = None) -> pd.DataFrame:
     if q is not None and not q.empty:
         df = df.merge(q[["code6", "gp_margin"]], on="code6", how="left")
         df["gross_margin"] = df["gp_margin"]
+    else:
+        df["gross_margin"] = np.nan
     df["code6"] = df["code6"].astype(str)
     return df.set_index("code6")
 
 
 def load_quality() -> pd.DataFrame:
+    qd_path = Path(QD_DB)
+    if not qd_path.exists() or qd_path.stat().st_size == 0:
+        return None
     con = sqlite3.connect(QD_DB)
-    # ★取覆盖最全的最近期（≥1000 只；MAX(period) 可能只有 47 只）
+    has_table = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='quality'").fetchone()
+    if not has_table:
+        con.close()
+        return None
+    # ★取覆盖最全的最近期；阈值按股票池 20% 推导（全市场约 1000 只，小样本可验收）
+    expected = _expected_universe_count()
+    min_cov = min(expected, max(20, int(expected * 0.2)))
     period = con.execute(
-        "SELECT period FROM quality WHERE period < '2026-07-01' "
-        "GROUP BY period HAVING COUNT(*) >= 1000 ORDER BY period DESC LIMIT 1").fetchone()
+        "SELECT period FROM quality WHERE period < ? "
+        "GROUP BY period HAVING COUNT(*) >= ? ORDER BY period DESC LIMIT 1",
+        (TODAY, min_cov)).fetchone()
     if not period:
         con.close()
         return None
@@ -221,12 +261,23 @@ def load_quality() -> pd.DataFrame:
     return df
 
 
+def _expected_universe_count() -> int:
+    """用本地股票基础表推导覆盖率阈值，避免小样本模式被全市场常数挡住。"""
+    try:
+        con = sqlite3.connect(f"file:{BASIC_DB}?mode=ro", uri=True, timeout=10)
+        n = con.execute("SELECT COUNT(*) FROM stock_basic WHERE status='1'").fetchone()[0]
+        con.close()
+        return int(n or 5000)
+    except Exception:
+        return 5000
+
+
 def load_st_codes() -> set:
     """ST 名单（bars.db is_st 最新一天）
-    ★2026-08-12 #136 修复：① 普通连接改 immutable 只读（防等锁）② is_st 异常检测+回溯——
+    ★2026-08-12 #136 修复：① 只读连接 ② is_st 异常检测+回溯——
     08-11 Tushare 增量写入丢 is_st 列（当天仅 4 只 vs 正常 ~200 只）→ ST 过滤静默失效；
     若最新日 is_st=1 数量 <50（异常），回溯最近 10 个交易日取第一个正常日（≥50）名单"""
-    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro&immutable=1", uri=True, timeout=3)
+    con = sqlite3.connect(f"file:{BARS_DB}?mode=ro", uri=True, timeout=10)
     try:
         # 双库合并探测最新交易日（#135 原则，复用 cache.py 已实现）
         try:
@@ -551,7 +602,7 @@ _event_flags_cache = {"ts": 0.0, "data": {}}
 
 
 def load_event_flags(codes: set, end: str = None) -> dict:
-    """批量查候选股最近 10 交易日 pct_chg → 事件因子标志（immutable 只读，5min 缓存）"""
+    """批量查候选股最近 10 交易日 pct_chg → 事件因子标志（只读，5min 缓存）"""
     if not codes:
         return {}
     now = time.time()
@@ -560,8 +611,8 @@ def load_event_flags(codes: set, end: str = None) -> dict:
     out = {}
     try:
         from pathlib import Path as _P
-        uri = f"{_P(BARS_DB).as_uri()}?mode=ro&immutable=1"
-        con = sqlite3.connect(uri, uri=True, timeout=3)
+        uri = f"{_P(BARS_DB).as_uri()}?mode=ro"
+        con = sqlite3.connect(uri, uri=True, timeout=10)
         # 先取 bars 最近交易日（★双库合并：主库 + 增量库最大值）
         mx = con.execute("SELECT MAX(date) FROM daily_bar").fetchone()[0]
         try:
@@ -849,7 +900,9 @@ def _big_caps() -> set:
     out = set()
     try:
         import sqlite3 as _sq
-        con = _sq.connect("file:data/cache/hist_mv.db?mode=ro&immutable=1", uri=True)
+        con = _sq.connect(
+            (CACHE_DIR / "hist_mv.db").resolve().as_uri() + "?mode=ro",
+            uri=True)
         m = con.execute("SELECT MAX(month) FROM hist_mv").fetchone()[0]
         vals = sorted(r[0] for r in con.execute(
             "SELECT circ_mv FROM hist_mv WHERE month=?", (m,)).fetchall())
@@ -1073,7 +1126,7 @@ _PW_PATHS = (
 )
 # ★2026-08-14 因子池产出路径（时间戳名，glob 最新）
 _PW_POOL_PATHS = (
-    Path(r"<home>\Desktop\量化代码库思路库\因子池\output"),
+    BASE / "data" / "factorpool" / "output",
 )
 
 
@@ -1358,14 +1411,14 @@ def _amount_20d_yi(codes: set) -> dict:
         import sqlite3 as _sq
         from pathlib import Path as _P
         import glob as _gl
-        # 主库 + 最近 3 个增量库（immutable 只读，与 portfolio._latest_close_of 同款）
-        _dbs = ["data/cache/bars.db"] + \
-               sorted(_gl.glob("data/cache/bars_incr_*.db"))[-3:]
+        # 主库 + 最近 3 个增量库（只读合并）
+        _dbs = [str(CACHE_DIR / "bars.db")] + \
+               sorted(_gl.glob(str(CACHE_DIR / "bars_incr_*.db")))[-3:]
         # 收集每 code 的 (date, amount_元) —— 增量库后写覆盖主库同日期
         _by_code = {c: {} for c in codes}
         for _db in _dbs:
             try:
-                _uri = _P(_db).as_uri() + "?mode=ro&immutable=1"
+                _uri = _P(_db).as_uri() + "?mode=ro"
                 _c = _sq.connect(_uri, uri=True, timeout=4)
                 _ph = ",".join("?" * len(codes))
                 for _r in _c.execute(
@@ -1616,7 +1669,7 @@ def compute_factors(px: pd.DataFrame, vx: pd.DataFrame, fin: pd.DataFrame,
     # ★C8（外包 08-12）：min_price 硬过滤——极端低价股（仙股/1 元股）流动性差、退市风险高，
     #   组合回测口径 min_price=1.5（外包 C4/C8 引擎已内置）；主系统补同款硬筛（non_lowprice）
     f["non_lowprice"] = (f["close"] >= 1.5).astype(int) if "close" in f.columns else 1
-    # ★估值因子（备用服务器 daily-basic 真实 PB/PE/股息率；失败降级价格分位近似）
+    # ★估值因子：本地腾讯快照；股息率缺失时按 0 处理，失败降级价格分位近似。
     val = load_valuation()
     if val:
         vdf = pd.DataFrame.from_dict(val, orient="index")

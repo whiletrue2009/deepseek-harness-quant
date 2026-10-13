@@ -24,6 +24,18 @@ _CACHE_SEC = 300
 _CIRCUIT = {"fail": 0, "open": False}   # ★熔断：接口连续 3 次失败 → 本进程停用（夜间限流防拖慢）
 
 
+def _tushare_enabled() -> bool:
+    """只有用户显式配置 Tushare 凭据时才启用资金/龙虎榜/筹码验证。"""
+    try:
+        import yaml
+        cfg = yaml.safe_load((BASE / "config" / "params.yaml").read_text(encoding="utf-8")) or {}
+        d = cfg.get("data", {})
+        backup = d.get("tushare_backup", {}) or {}
+        return bool(d.get("tushare_token") or (backup.get("url") and backup.get("api_key")))
+    except Exception:
+        return False
+
+
 def _load(fetcher_fn, key: str, **kw):
     """带缓存、熔断与降级的接口调用；失败 → None"""
     if _CIRCUIT["open"]:
@@ -49,6 +61,8 @@ def _load(fetcher_fn, key: str, **kw):
 
 def get_flow(code: str, date: str = None) -> dict:
     """单只主力资金流（近 1-3 日净流入）→ {net_in_1d, net_in_3d, trend} 或 None"""
+    if not _tushare_enabled():
+        return None
     from data.fetcher_tushare import get_moneyflow
     d = _load(get_moneyflow, "mf", trade_date=date.replace("-", "") if date else None)
     if d is None or d.empty:
@@ -68,6 +82,8 @@ def get_flow(code: str, date: str = None) -> dict:
 
 def get_top(code: str, date: str = None) -> dict:
     """龙虎榜验证 → {on_list, net_buy, inst_buy} 或 None"""
+    if not _tushare_enabled():
+        return None
     from data.fetcher_tushare import get_top_list
     d = _load(get_top_list, "tl", trade_date=date or "2026-08-10")
     if d is None or d.empty:
@@ -85,6 +101,8 @@ def get_top(code: str, date: str = None) -> dict:
 
 def get_cyq(code: str, date: str = None) -> dict:
     """筹码验证 → {profit_ratio(获利盘%), concent} 或 None"""
+    if not _tushare_enabled():
+        return None
     from data.fetcher_tushare import get_cyq_perf
     d = _load(get_cyq_perf, "cyq", ts_code=code,
               trade_date=date.replace("-", "") if date else None)

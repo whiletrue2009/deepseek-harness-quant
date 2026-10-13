@@ -28,8 +28,10 @@ import pandas as pd
 BASE = Path(__file__).resolve().parent.parent.parent   # factors/opportunities/ → deepseek-harness-quant
 sys.path.insert(0, str(BASE))
 
-BARS_DB = r"data/cache/bars.db"
-FIN_TS_DB = r"data/cache/finance_ts.db"
+from data.cache import CACHE_DIR
+
+BARS_DB = CACHE_DIR / "bars.db"
+FIN_TS_DB = CACHE_DIR / "finance_ts.db"
 
 # 回放点（季度初，近 5 个季度：2025-06 起）
 REPLAY_DATES = ["2025-06-03", "2025-09-01", "2026-01-05", "2026-04-01", "2026-07-01"]

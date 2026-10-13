@@ -14,6 +14,8 @@ harness/node_modules/
 harness/home/sessions/
 harness/home/storages/
 harness/home/profiles/web/node_modules/
+harness/home/profiles/headless/
+harness/home/skills/one-click-deploy/
 harness/home/.anonymous-user-id
 harness/home/.credentials.yaml
 
@@ -29,7 +31,8 @@ data/trash/
 # ---- 运行产物 ----
 logs/
 output/
-report/
+report/*
+!report/daily_signal.py
 deck/dashboard_*_20*.html
 deck/*.json
 

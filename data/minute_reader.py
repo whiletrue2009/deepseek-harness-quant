@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE = Path(r"data/minute/download")
+BASE = Path(__file__).resolve().parent.parent / "data/minute/download"
 
 
 def _zip_path(freq: str, year: str) -> Path:
@@ -44,7 +44,7 @@ def read_day(trade_date: str, freq: str = "1m") -> pd.DataFrame:
                 with zf.open(name) as f:
                     return pd.read_parquet(io.BytesIO(f.read()))
     # fallback：incr_parquet 目录（7z 增量转 parquet；★实际位置在 data/minute/incr_parquet）
-    incr = Path(r"data/minute/incr_parquet") / name
+    incr = Path(__file__).resolve().parent.parent / "data/minute/incr_parquet" / name
     if incr.exists():
         return pd.read_parquet(incr)
     return pd.DataFrame()
@@ -66,7 +66,7 @@ def list_days(freq: str = "1m") -> list:
             for n in zf.namelist():
                 if n.endswith(".parquet"):
                     days.append(n.replace(".parquet", ""))
-    incr_dir = Path(r"data/minute/incr_parquet")
+    incr_dir = Path(__file__).resolve().parent.parent / "data/minute/incr_parquet"
     if incr_dir.exists():
         for p in incr_dir.glob("*.parquet"):
             days.append(p.stem)

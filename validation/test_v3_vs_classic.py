@@ -32,7 +32,7 @@ from validation.test_regime_classified import load_index, metrics, regime_cash_a
 COST = 0.00026 + 0.0005 + 0.001
 TOP_N = 10
 MIN_MV_YI = 50.0
-MV_MAP_CSV = Path(r"data/cache\circ_mv_map_full.csv")
+MV_MAP_CSV = Path(r"data/cache/circ_mv_map_full.csv")
 
 
 def load_panel():
